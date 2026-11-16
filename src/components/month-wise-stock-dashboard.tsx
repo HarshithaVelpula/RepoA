@@ -27,7 +27,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const [collapsed, setCollapsed] = useState(true);
   const [showOthers, setShowOthers] = useState(false);
   const periods = useMemo(() => [...new Set(rows.map((r) => r.period))].sort(), [rows]);
-  const defaultMonths = useMemo(() => { const now = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 7); return periods.includes(now) ? [now] : periods.length ? [periods[periods.length - 1]] : null; }, [periods]);
+  const defaultMonths = useMemo(() => { const now = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 7); return periods.includes(now) ? [now] : periods.length ? [periods[periods.length - 1] as string] : null; }, [periods]);
   const [monthSel, setMonthSel] = useState<string[] | null | undefined>(undefined);
   const months = monthSel === undefined ? defaultMonths : monthSel;
   const opt = (k: (r: StockRow) => string) => [...new Set(rows.map(k).filter(Boolean))].sort();
