@@ -74,14 +74,14 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
       <Dialog open={showOthers} onOpenChange={setShowOthers}><DialogContent className="max-w-md"><DialogHeader><DialogTitle>Other Types (₹ Cr)</DialogTitle></DialogHeader><BarList data={tw.others} fmt={crv} /></DialogContent></Dialog>
     </div>
 
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-      <div className="lg:col-span-1 xl:col-span-2"><Card tint="copper" title="Top 15 Plants" sub={`${sub} · ₹ Cr`}><div className="h-64"><ResponsiveContainer><ComposedChart data={sumBy(cur, (r) => r.sub3 || r.plant).slice(0, 15)} margin={{ top: 18, left: 10, right: 8 }}>
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+      <div className="lg:col-span-8"><Card tint="copper" title="Top 15 Plants" sub={`${sub} · ₹ Cr`}><div className="h-64"><ResponsiveContainer><ComposedChart data={sumBy(cur, (r) => r.sub3 || r.plant).slice(0, 15)} margin={{ top: 18, left: 10, right: 8 }}>
         <defs>{Array.from({ length: 15 }, (_, i) => <linearGradient key={i} id={`mws-p${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={radiantColor(i)} /><stop offset="100%" stopColor={radiantColor(i)} stopOpacity={0.45} /></linearGradient>)}</defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={60} tick={{ fontSize: 10, fill: "var(--foreground)", fontWeight: 600 }} /><YAxis tick={{ fontSize: 10, fill: "var(--foreground)" }} tickFormatter={(v: number) => (v / 1e7).toFixed(0)} />
         <Tooltip formatter={(v: number) => crv(v)} />
         <Bar dataKey="value" name="CB Val" radius={[6, 6, 0, 0]} maxBarSize={44}>{sumBy(cur, (r) => r.sub3 || r.plant).slice(0, 15).map((_, i) => <Cell key={i} fill={`url(#mws-p${i})`} />)}<LabelList dataKey="value" position="top" formatter={(v: number) => crv(v)} style={{ fontSize: 9, fontWeight: 700, fill: "var(--foreground)" }} /></Bar>
       </ComposedChart></ResponsiveContainer></div></Card></div>
-      {groupCard("Top 10 Materials", (r) => r.materialName || r.material, "violet")}
+      <div className="lg:col-span-4">{groupCard("Top 10 Materials", (r) => r.materialName || r.material, "violet")}</div>
     </div>
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       {gCard("Main Group", (r) => r.mainGroup, "sky")}
