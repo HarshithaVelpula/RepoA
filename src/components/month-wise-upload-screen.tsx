@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { hasScreen } from "@/lib/screens";
 import { useLaunchpad } from "@/lib/use-launchpad";
 import { downloadMasterExcel, parseWorkbook } from "@/lib/sap-master";
-import { deleteRows, EXTRA_COLUMNS, fetchMonthRows, FY_MONTH_ORDER, MONTHS, nonEmptyRows, orderColumns, replaceMonth, updateRow } from "@/lib/month-wise-upload";
+import { deleteMonth, deleteRows, EXTRA_COLUMNS, fetchMonthRows, FY_MONTH_ORDER, MONTHS, nonEmptyRows, orderColumns, replaceMonth, updateRow } from "@/lib/month-wise-upload";
 
 const PAGE = 50;
 const TITLE = "Month Wise Upload";
@@ -84,7 +84,7 @@ function View({ canEdit }: { canEdit: boolean }) {
       <div className="flex w-full flex-wrap justify-end gap-2 md:ml-auto md:w-auto md:shrink-0 md:flex-nowrap">
         {rows.length > 0 && <Button className="btn-success md:px-3" onClick={() => void downloadMasterExcel(label, allCols, exportRows, TITLE)}><Download className="mr-1 h-4 w-4" />Excel</Button>}
         {canEdit && <>
-          {rows.length > 0 && <Button className="btn-danger md:px-3" onClick={() => { if (confirm(`Delete all ${rows.length} rows for ${label}?`)) void run(() => deleteRows(rows.map((r) => r.id), month, year), "Month deleted"); }}><Trash2 className="mr-1 h-4 w-4" />Delete<span className="hidden xl:inline">&nbsp;month</span></Button>}
+          {rows.length > 0 && <Button className="btn-danger md:px-3" onClick={() => { if (confirm(`Delete all ${rows.length} rows for ${label}?`)) void run(() => deleteMonth(month, year), "Month deleted"); }}><Trash2 className="mr-1 h-4 w-4" />Delete<span className="hidden xl:inline">&nbsp;month</span></Button>}
           <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ""; }} />
           <UploadExcelButton busy={busy} onClick={() => fileRef.current?.click()} />
         </>}

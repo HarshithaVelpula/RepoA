@@ -50,7 +50,14 @@ export async function updateRow(id: string, data: Record<string, string>) {
   if (error) throw error;
 }
 export async function deleteRows(ids: string[], month: number, year: number) {
-  const { error } = await supabase.from("month_wise_upload").delete().in("id", ids);
-  if (error) throw error;
+  for (let i = 0; i < ids.length; i += 50) {
+    const { error } = await supabase.from("month_wise_upload").delete().in("id", ids.slice(i, i + 50));
+    if (error) throw error;
+  }
   await supabase.from("month_wise_upload").update({ updated_at: new Date().toISOString() }).eq("month", month).eq("year", year);
+}
+/** Delete a whole month by month/year (short request, no id list). */
+export async function deleteMonth(month: number, year: number) {
+  const { error } = await supabase.from("month_wise_upload").delete().eq("month", month).eq("year", year);
+  if (error) throw error;
 }
