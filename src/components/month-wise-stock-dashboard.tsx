@@ -18,9 +18,9 @@ const crv = (v: number) => (v / 1e7).toLocaleString("en-IN", { minimumFractionDi
 const full = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pl = (p: string) => `${MON[Number(p.slice(5, 7)) - 1]}-${p.slice(0, 4)}`;
 const TONES = ["#0f9d8a", "#e08a1e", "#8e44ad", "#d64550", "#3a8dde", "#16a3b8", "#c0841a", "#5c6bc0", "#2e8b57", "#64748b"];
-const sel = "h-8 w-full rounded-md border border-border bg-background px-2 text-xs";
-type F = { plant: string; type: string; matGroup: string; };
-const EMPTY: F = { plant: "", type: "", matGroup: "" };
+type F = { plants: string[] | null; types: string[] | null };
+const EMPTY: F = { plants: null, types: null };
+const plantName = (r: StockRow) => r.sub3 || r.plant;
 
 export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const [f, setF] = useState<F>(EMPTY);
@@ -31,8 +31,8 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const [monthSel, setMonthSel] = useState<string[] | null | undefined>(undefined);
   const months = monthSel === undefined ? defaultMonths : monthSel;
   const opt = (k: (r: StockRow) => string) => [...new Set(rows.map(k).filter(Boolean))].sort();
-  const opts = useMemo(() => ({ plant: opt((r) => r.plant), type: opt((r) => r.type), matGroup: opt((r) => r.matGroup) }), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
-  const filtered = useMemo(() => rows.filter((r) => (!f.plant || r.plant === f.plant) && (!f.type || r.type === f.type) && (!f.matGroup || r.matGroup === f.matGroup)
+  const opts = useMemo(() => ({ plant: opt(plantName), type: opt((r) => r.type) }), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filtered = useMemo(() => rows.filter((r) => (!f.plants || f.plants.includes(plantName(r))) && (!f.types || f.types.includes(r.type))
     && (!months || months.includes(r.period))), [rows, f, months]);
   // Tiles and cards add up every month in the selected range (All = every month).
   const cur = filtered;
@@ -41,8 +41,8 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const tw = topWithOthers(types, 10);
   const monthly = useMemo(() => { const m = new Map<string, number>(); for (const r of filtered) m.set(r.period, (m.get(r.period) ?? 0) + r.value); return [...m.entries()].sort().map(([k, v]) => ({ name: pl(k), value: v })); }, [filtered]);
   const zk = useMemo(() => toPurchaseRows(filtered), [filtered]);
-  const field = (k: "plant" | "type" | "matGroup", label: string) => <label className="min-w-0 text-[10px] font-semibold text-muted-foreground">{label}
-    <select className={sel} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} aria-label={label}><option value="">All</option>{opts[k].map((v) => <option key={v} value={v}>{v}</option>)}</select></label>;
+  const MS = "col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0";
+  const field = (k: "plants" | "types", o: string[], label: string) => <div className={MS}><FilterMultiSelect label={label} selected={f[k]} options={o} onChange={(v) => setF({ ...f, [k]: v.length === o.length ? null : v })} placeholder="All" /></div>;
   const sub = !months || months.length === periods.length ? "All months" : months.length ? [...months].sort().map(pl).join(", ") : "No months";
   const gCard = (title: string, k: (r: StockRow) => string, tint: Tint) => {
     const g = summarizeGroupsByDivision(cur.filter((r) => k(r)).map((r) => ({ name: k(r), value: r.value / 1e7, order: r.key, division: r.plant })), (r) => r.name);
@@ -54,7 +54,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
     <div data-pdf-exclude className="rounded-xl border border-border shadow-sm" style={TINTS.neutral}>
       <button type="button" aria-expanded={!collapsed} onClick={() => setCollapsed((c) => !c)} className="flex w-full items-center justify-between px-3 py-1.5 text-xs font-semibold text-card-foreground"><span>Filters</span><ChevronDown className={`size-4 transition-transform ${collapsed ? "-rotate-90" : ""}`} /></button>
       {collapsed ? null : <div className="grid grid-cols-2 gap-2 px-3 pb-2 sm:grid-cols-3 lg:grid-cols-6">
-        <div className="col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0"><FilterMultiSelect label="Month" selected={months} options={periods.map((p) => ({ value: p, label: pl(p) }))} onChange={(v) => setMonthSel(v.length === periods.length ? null : v)} placeholder="All months" /></div>{field("plant", "Plant")}{field("type", "Type")}{field("matGroup", "Material Group")}
+        <div className="col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0"><FilterMultiSelect label="Month" selected={months} options={periods.map((p) => ({ value: p, label: pl(p) }))} onChange={(v) => setMonthSel(v.length === periods.length ? null : v)} placeholder="All months" /></div>{field("plants", opts.plant, "Plant")}{field("types", opts.type, "Type")}
         <div className="flex items-end"><Button type="button" variant="reset" size="sm" className="h-8 w-full text-xs" onClick={() => { setF(EMPTY); setMonthSel(undefined); }}>Reset</Button></div>
       </div>}
     </div>
