@@ -41,3 +41,14 @@ describe("latestPeriod", () => {
   it("picks the latest selected month", () => { expect(lpTest(["2026-08", "2026-10", "2026-09"])).toBe("2026-10"); });
   it("is empty with no months", () => { expect(lpTest([])).toBe(""); });
 });
+
+import { lastNMonthsByType as l3 } from "./month-wise-stock-map";
+describe("lastNMonthsByType", () => {
+  it("uses only the last 3 months and top 5 types", () => {
+    const mk = (type: string, period: string, value: number) => ({ type, period, value } as never);
+    const rows = ["A","B","C","D","E","F"].flatMap((t, i) => ["2026-07","2026-08","2026-09","2026-10"].map((p) => mk(t, p, (i + 1) * 10)));
+    const r = l3(rows, ["2026-07","2026-08","2026-09","2026-10"]);
+    expect(r.months).toEqual(["2026-08","2026-09","2026-10"]);
+    expect(r.data.map((d) => d.name)).toEqual(["F","E","D","C","B"]);
+  });
+});

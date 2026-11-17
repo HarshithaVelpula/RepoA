@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, IndianRupee } from "lucide-react";
-import { Bar, CartesianGrid, Cell, ComposedChart, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, Cell, ComposedChart, LabelList, ResponsiveContainer, Tooltip, Legend, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { BarList, Card, Tile } from "@/components/open-po-dashboard";
 import { ZrmmatCompareCard } from "@/components/zrmmat-compare-card";
@@ -11,7 +11,7 @@ import { OrderBookSubGroupChart } from "@/components/order-book-subgroup-chart";
 import { summarizeGroupsByDivision } from "@/lib/open-orders-groups";
 import { FilterMultiSelect } from "@/components/filter-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { sumBy, latestPeriod, topWithOthers, toPurchaseRows, type StockRow } from "@/lib/month-wise-stock-map";
+import { sumBy, latestPeriod, lastNMonthsByType, topWithOthers, toPurchaseRows, type StockRow } from "@/lib/month-wise-stock-map";
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const crv = (v: number) => (v / 1e7).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -41,6 +41,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const types = sumBy(cur, (r) => r.type);
   const tw = topWithOthers(types, 10);
   const monthly = useMemo(() => { const m = new Map<string, number>(); for (const r of filtered) m.set(r.period, (m.get(r.period) ?? 0) + r.value); return [...m.entries()].sort().map(([k, v]) => ({ name: pl(k), value: v })); }, [filtered]);
+  const cmp = useMemo(() => lastNMonthsByType(rows.filter((r) => (!f.plants || f.plants.includes(plantName(r))) && (!f.types || f.types.includes(r.type))), periods), [rows, f, periods]);
   const zk = useMemo(() => toPurchaseRows(filtered), [filtered]);
   const MS = "col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0";
   const field = (k: "plants" | "types", o: string[], label: string) => <div className={MS}><FilterMultiSelect label={label} selected={f[k]} options={o} onChange={(v) => setF({ ...f, [k]: v.length === o.length ? null : v })} placeholder="All" /></div>;
@@ -65,12 +66,20 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
       {types.filter((t) => t.value !== 0).slice(0, 5).map((t, i) => <Tile key={t.name} icon={<IndianRupee className="size-5" />} label={t.name} value={crv(t.value)} tone={TONES[i % TONES.length] ?? "#64748b"} />)}
     </div>
 
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">
+    <div className="grid grid-cols-1 gap-3">
       <Card tint="teal" title="Month Wise Inventory" sub={`${months && months.length !== periods.length ? `${months.length} month(s)` : "All months"} · CB Val · ₹ Cr`}><div className="h-64"><ResponsiveContainer><ComposedChart data={monthly} margin={{ top: 18, left: 10, right: 8 }}>
         <defs>{Array.from({ length: 10 }, (_, i) => <linearGradient key={i} id={`mws-g${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={radiantColor(i)} /><stop offset="100%" stopColor={radiantColor(i)} stopOpacity={0.45} /></linearGradient>)}</defs><CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--foreground)", fontWeight: 600 }} /><YAxis tick={{ fontSize: 10, fill: "var(--foreground)" }} tickFormatter={(v: number) => (v / 1e7).toFixed(0)} />
         <Tooltip formatter={(v: number) => crv(v)} />
         <Bar dataKey="value" name="CB Val" radius={[6, 6, 0, 0]} maxBarSize={44}>{monthly.map((_, i) => <Cell key={i} fill={`url(#mws-g${i % 10})`} />)}<LabelList dataKey="value" position="top" formatter={(v: number) => crv(v)} style={{ fontSize: 9, fontWeight: 700, fill: "var(--foreground)" }} /></Bar>
       </ComposedChart></ResponsiveContainer></div></Card>
+    </div>
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">
+      <Card tint="violet" title="Last 3 Months Comparison" sub="Top 5 Types · ₹ Cr">{cmp.data.length ? <div className="h-64"><ResponsiveContainer><ComposedChart data={cmp.data} margin={{ top: 18, left: 10, right: 8 }}>
+        <defs>{cmp.months.map((_, i) => <linearGradient key={i} id={`mws-c${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={radiantColor(i * 3)} /><stop offset="100%" stopColor={radiantColor(i * 3)} stopOpacity={0.45} /></linearGradient>)}</defs>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="name" interval={0} tick={{ fontSize: 10, fill: "var(--foreground)", fontWeight: 600 }} /><YAxis tick={{ fontSize: 10, fill: "var(--foreground)" }} tickFormatter={(v: number) => (v / 1e7).toFixed(0)} />
+        <Tooltip formatter={(v: number) => crv(v)} /><Legend wrapperStyle={{ fontSize: 11 }} />
+        {cmp.months.map((p, i) => <Bar key={p} dataKey={p} name={pl(p)} fill={`url(#mws-c${i})`} radius={[4, 4, 0, 0]} maxBarSize={28}><LabelList dataKey={p} position="top" formatter={(v: number) => crv(v)} style={{ fontSize: 8, fontWeight: 700, fill: "var(--foreground)" }} /></Bar>)}
+      </ComposedChart></ResponsiveContainer></div> : <p className="py-8 text-center text-xs text-muted-foreground">No data</p>}</Card>
       <Card tint="sky" title="Top 10 Types" sub={`${sub} · ₹ Cr`}><BarList data={tw.top} fmt={crv} />{tw.others.length ? <button type="button" data-pdf-exclude onClick={() => setShowOthers(true)} className="mt-2 w-full rounded-md border border-border px-2 py-1 text-left text-[11px] font-semibold text-primary hover:bg-muted">Others ({tw.others.length}) · ₹ {crv(tw.others.reduce((a, o) => a + o.value, 0))} Cr — view</button> : null}</Card>
       <Dialog open={showOthers} onOpenChange={setShowOthers}><DialogContent className="max-w-md"><DialogHeader><DialogTitle>Other Types (₹ Cr)</DialogTitle></DialogHeader><BarList data={tw.others} fmt={crv} /></DialogContent></Dialog>
     </div>

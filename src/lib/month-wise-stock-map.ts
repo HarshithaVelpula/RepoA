@@ -65,3 +65,19 @@ export function topWithOthers<T extends { name: string; value: number }>(list: T
 export function latestPeriod(periods: readonly string[]): string {
   return periods.reduce((m, p) => (p > m ? p : m), "");
 }
+
+/** Last n uploaded months compared for the top types (ranked by latest month). */
+export function lastNMonthsByType(rows: StockRow[], periods: readonly string[], n = 3, top = 5) {
+  const months = [...new Set(periods)].sort().slice(-n);
+  const m = new Map<string, Record<string, number>>();
+  for (const r of rows) {
+    if (!r.type || !months.includes(r.period)) continue;
+    const e = m.get(r.type) ?? {};
+    e[r.period] = (e[r.period] ?? 0) + r.value;
+    m.set(r.type, e);
+  }
+  const last = months[months.length - 1] ?? "";
+  const data = [...m].map(([name, v]) => ({ name, ...Object.fromEntries(months.map((p) => [p, v[p] ?? 0])) } as { name: string } & Record<string, number | string>))
+    .sort((a, b) => (Number(b[last]) || 0) - (Number(a[last]) || 0)).slice(0, top);
+  return { months, data };
+}
