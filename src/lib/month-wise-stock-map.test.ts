@@ -52,3 +52,11 @@ describe("lastNMonthsByType", () => {
     expect(r.data.map((d) => d.name)).toEqual(["F","E","D","C","B"]);
   });
 });
+
+describe("lastNMonthsByType latest-month types", () => {
+  it("drops types absent in the latest month", () => {
+    const mk = (type: string, period: string, value: number) => ({ type, period, value } as never);
+    const r = l3([mk("A","2026-11",5), mk("B","2026-10",9)], ["2026-10","2026-11"]);
+    expect(r.data.map((d) => d.name)).toEqual(["A"]);
+  });
+});

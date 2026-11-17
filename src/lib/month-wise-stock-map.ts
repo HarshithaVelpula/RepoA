@@ -78,6 +78,6 @@ export function lastNMonthsByType(rows: StockRow[], periods: readonly string[], 
   }
   const last = months[months.length - 1] ?? "";
   const data = [...m].map(([name, v]) => ({ name, ...Object.fromEntries(months.map((p) => [p, v[p] ?? 0])) } as { name: string } & Record<string, number | string>))
-    .sort((a, b) => (Number(b[last]) || 0) - (Number(a[last]) || 0)).slice(0, top);
+    .filter((d) => (Number(d[last]) || 0) !== 0).sort((a, b) => (Number(b[last]) || 0) - (Number(a[last]) || 0)).slice(0, top);
   return { months, data };
 }
