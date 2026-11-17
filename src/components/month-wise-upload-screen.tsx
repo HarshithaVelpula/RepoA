@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { UploadExcelButton } from "@/components/upload-excel-button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { hasScreen } from "@/lib/screens";
 import { useLaunchpad } from "@/lib/use-launchpad";
 import { downloadMasterExcel, parseWorkbook } from "@/lib/sap-master";
-import { deleteMonth, deleteRows, EXTRA_COLUMNS, fetchMonthRows, FY_MONTH_ORDER, MONTHS, nonEmptyRows, orderColumns, replaceMonth, updateRow } from "@/lib/month-wise-upload";
+import { BASE_COLUMNS, deleteMonth, deleteRows, EXTRA_COLUMNS, fetchMonthPage, fetchMonthRows, FY_MONTH_ORDER, MONTHS, nonEmptyRows, replaceMonth, updateRow } from "@/lib/month-wise-upload";
 
 const PAGE = 50;
 const TITLE = "Month Wise Upload";
@@ -32,31 +32,30 @@ function View({ canEdit }: { canEdit: boolean }) {
   const [year, setYear] = useState(now.getFullYear());
   const years = Array.from({ length: 8 }, (_, i) => now.getFullYear() + 1 - i);
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["month-wise-upload", year, month], queryFn: () => fetchMonthRows(month, year), refetchOnWindowFocus: false });
-  const rows = q.data ?? [];
-  const cols = useMemo(() => orderColumns(rows), [rows]);
   const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => { const t = setTimeout(() => setDebounced(search), 400); return () => clearTimeout(t); }, [search]);
   const [page, setPage] = useState(0);
+  const q = useQuery({ queryKey: ["month-wise-upload", year, month, debounced, page], queryFn: () => fetchMonthPage(month, year, debounced, page * PAGE, PAGE), refetchOnWindowFocus: false, placeholderData: (p) => p });
+  const view = q.data?.rows ?? [];
+  const totalRows = q.data?.all_total ?? 0;
+  const cols = useMemo(() => { const c = q.data?.columns ?? []; return [...BASE_COLUMNS.filter((k) => c.includes(k)), ...c.filter((k) => !BASE_COLUMNS.includes(k))]; }, [q.data?.columns]);
   const [busy, setBusy] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ id: string; data: Record<string, string> } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const created = rows.reduce<string | null>((m, r) => !m || r.created_at < m ? r.created_at : m, null);
-  const updated = rows.reduce<string | null>((m, r) => !m || r.updated_at > m ? r.updated_at : m, null);
+  const created = q.data?.created ?? null;
+  const updated = q.data?.updated ?? null;
   const label = `${MONTHS[month - 1]} ${year}`;
-  const filtered = useMemo(() => {
-    const s = search.trim().toLowerCase();
-    return s ? rows.filter((r) => cols.some((c) => (r.data[c] ?? "").toLowerCase().includes(s))) : rows;
-  }, [rows, cols, search]);
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
-  const view = filtered.slice(page * PAGE, page * PAGE + PAGE);
-  const reload = async () => { void qc.invalidateQueries({ queryKey: ["tables-master-status"] }); await qc.invalidateQueries({ queryKey: ["month-wise-upload", year, month] }); };
+  const filteredCount = q.data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(filteredCount / PAGE));
+  const reload = async () => { void qc.invalidateQueries({ queryKey: ["tables-master-status"] }); void qc.invalidateQueries({ queryKey: ["month-wise-stock"] }); await qc.invalidateQueries({ queryKey: ["month-wise-upload", year, month] }); };
 
   const onFile = async (f: File) => {
     try {
       const sheets = await parseWorkbook(f);
       const data = nonEmptyRows(sheets[0]?.rows ?? []);
       if (!data.length) { toast.error("No rows found in this Excel file"); return; }
-      if (rows.length && !confirm(`${label} already has ${rows.length} rows. Replace them with ${data.length} rows from this file?`)) return;
+      if (totalRows && !confirm(`${label} already has ${totalRows} rows. Replace them with ${data.length} rows from this file?`)) return;
       setBusy("Uploading…");
       await replaceMonth(month, year, data, created, (d, t) => setBusy(`Uploading ${d} / ${t}`));
       toast.success(`${data.length} rows saved for ${label}`);
@@ -65,7 +64,8 @@ function View({ canEdit }: { canEdit: boolean }) {
   };
   const run = async (fn: () => Promise<void>, ok: string) => { try { await fn(); toast.success(ok); await reload(); } catch (e) { toast.error((e as Error).message); } };
   const allCols = [...cols, ...EXTRA_COLUMNS];
-  const exportRows = filtered.map((r) => ({ ...r.data, Month: MONTHS[r.month - 1]!, Year: String(r.year), "Created Date": fmtIst(r.created_at), "Updated Date": fmtIst(r.updated_at) }));
+  const toExport = (rs: typeof view) => rs.map((r) => ({ ...r.data, Month: MONTHS[r.month - 1]!, Year: String(r.year), "Created Date": fmtIst(r.created_at), "Updated Date": fmtIst(r.updated_at) }));
+  const exportExcel = () => run(async () => { setBusy("Preparing Excel…"); try { const all = await fetchMonthRows(month, year); const s = debounced.trim().toLowerCase(); await downloadMasterExcel(label, allCols, toExport(s ? all.filter((r) => JSON.stringify(r.data).toLowerCase().includes(s)) : all), TITLE); } finally { setBusy(null); } }, "Excel ready");
 
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-3 rounded-lg border tm-panel p-4 md:flex-nowrap">
@@ -80,11 +80,11 @@ function View({ canEdit }: { canEdit: boolean }) {
           <SelectContent>{years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
         </Select></div>
       <Input className="w-full sm:w-auto sm:min-w-48 sm:flex-1 md:w-32 md:min-w-0 xl:max-w-80" placeholder="Search…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
-      <div className="shrink-0 pb-2 text-xs text-muted-foreground">{rows.length} rows</div>
+      <div className="shrink-0 pb-2 text-xs text-muted-foreground">{totalRows} rows</div>
       <div className="flex w-full flex-wrap justify-end gap-2 md:ml-auto md:w-auto md:shrink-0 md:flex-nowrap">
-        {rows.length > 0 && <Button className="btn-success md:px-3" onClick={() => void downloadMasterExcel(label, allCols, exportRows, TITLE)}><Download className="mr-1 h-4 w-4" />Excel</Button>}
+        {totalRows > 0 && <Button className="btn-success md:px-3" disabled={!!busy} onClick={() => void exportExcel()}><Download className="mr-1 h-4 w-4" />Excel</Button>}
         {canEdit && <>
-          {rows.length > 0 && <Button className="btn-danger md:px-3" onClick={() => { if (confirm(`Delete all ${rows.length} rows for ${label}?`)) void run(() => deleteMonth(month, year), "Month deleted"); }}><Trash2 className="mr-1 h-4 w-4" />Delete<span className="hidden xl:inline">&nbsp;month</span></Button>}
+          {totalRows > 0 && <Button className="btn-danger md:px-3" onClick={() => { if (confirm(`Delete all ${totalRows} rows for ${label}?`)) void run(() => deleteMonth(month, year), "Month deleted"); }}><Trash2 className="mr-1 h-4 w-4" />Delete<span className="hidden xl:inline">&nbsp;month</span></Button>}
           <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ""; }} />
           <UploadExcelButton busy={busy} onClick={() => fileRef.current?.click()} />
         </>}
@@ -92,14 +92,14 @@ function View({ canEdit }: { canEdit: boolean }) {
     </div>
     <div className="tm-card">
     <div className="tm-card-head">
-      <div className="text-sm font-semibold">{label} <span className="text-xs font-normal text-muted-foreground">· {filtered.length} rows</span></div>
-    {rows.length > 0 && <div className="text-xs text-muted-foreground">Created on <span className="font-medium text-foreground">{fmtIst(created)}</span> · Last updated on <span className="font-medium text-foreground">{fmtIst(updated)}</span> IST</div>}
+      <div className="text-sm font-semibold">{label} <span className="text-xs font-normal text-muted-foreground">· {filteredCount} rows</span></div>
+    {totalRows > 0 && <div className="text-xs text-muted-foreground">Created on <span className="font-medium text-foreground">{fmtIst(created)}</span> · Last updated on <span className="font-medium text-foreground">{fmtIst(updated)}</span> IST</div>}
     </div>
     <div className="tm-card-body"><div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead className="sticky top-0 z-10 tm-thead"><tr>
           {allCols.map((c) => <th key={c} className="whitespace-nowrap px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-wide">{c}</th>)}
-          {canEdit && rows.length > 0 && <th className="px-2.5 py-2 text-right text-[11px] font-semibold uppercase">Actions</th>}
+          {canEdit && totalRows > 0 && <th className="px-2.5 py-2 text-right text-[11px] font-semibold uppercase">Actions</th>}
         </tr></thead>
         <tbody>
           {view.map((r) => <tr key={r.id} className="border-t odd:bg-muted/40 hover:bg-accent/50">

@@ -19,30 +19,52 @@ export function orderColumns(rows: { data: Record<string, string> }[]): string[]
 /** Pure: drop rows where every cell is empty. */
 export const nonEmptyRows = (rows: Record<string, string>[]) => rows.filter((r) => Object.values(r).some((v) => (v ?? "").toString().trim() !== ""));
 
+/** Keyset read of every row for a month (used for Excel export). */
 export async function fetchMonthRows(month: number, year: number): Promise<MwuRow[]> {
   const out: MwuRow[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from("month_wise_upload").select("id,month,year,data,created_at,updated_at").eq("month", month).eq("year", year).order("created_at").order("id").range(from, from + 999);
+  let last: string | null = null;
+  for (;;) {
+    let q = supabase.from("month_wise_upload").select("id,month,year,data,created_at,updated_at").eq("year", year).eq("month", month).order("id").limit(1000);
+    if (last) q = q.gt("id", last);
+    const { data, error } = await q;
     if (error) throw error;
-    out.push(...((data ?? []) as unknown as MwuRow[]));
-    if (!data || data.length < 1000) break;
+    const rows = (data ?? []) as unknown as MwuRow[];
+    out.push(...rows);
+    if (rows.length < 1000) break;
+    last = rows[rows.length - 1]!.id;
   }
   return out;
+}
+
+export type MwuPage = { total: number; all_total: number; created: string | null; updated: string | null; columns: string[]; rows: MwuRow[] };
+/** One server-side page (search + count + timestamps) so large months load instantly. */
+export async function fetchMonthPage(month: number, year: number, search: string, offset: number, limit: number): Promise<MwuPage> {
+  const { data, error } = await supabase.rpc("month_wise_upload_page", { _month: month, _year: year, _search: search, _offset: offset, _limit: limit });
+  if (error) throw error;
+  return data as unknown as MwuPage;
+}
+
+/** Run async jobs with a fixed number of parallel workers. */
+async function pool<T>(items: T[], workers: number, fn: (item: T) => Promise<void>) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(workers, items.length) }, async () => { while (i < items.length) await fn(items[i++]!); }));
 }
 
 /** Replace a month's rows, keeping its original created date. */
 export async function replaceMonth(month: number, year: number, rows: Record<string, string>[], existingCreated: string | null, onProgress?: (d: number, t: number) => void) {
   const { data: u } = await supabase.auth.getUser();
-  const del = await supabase.from("month_wise_upload").delete().eq("month", month).eq("year", year);
-  if (del.error) throw del.error;
+  await deleteMonth(month, year);
   const now = new Date().toISOString();
   const created = existingCreated ?? now;
-  for (let i = 0; i < rows.length; i += 500) {
-    const chunk = rows.slice(i, i + 500).map((d) => ({ month, year, data: d, created_at: created, updated_at: now, created_by: u.user?.id ?? null }));
-    const { error } = await supabase.from("month_wise_upload").insert(chunk);
+  const chunks: Record<string, string>[][] = [];
+  for (let i = 0; i < rows.length; i += 1000) chunks.push(rows.slice(i, i + 1000));
+  let done = 0;
+  await pool(chunks, 4, async (c) => {
+    const { error } = await supabase.from("month_wise_upload").insert(c.map((d) => ({ month, year, data: d, created_at: created, updated_at: now, created_by: u.user?.id ?? null })));
     if (error) throw error;
-    onProgress?.(Math.min(i + 500, rows.length), rows.length);
-  }
+    done += c.length;
+    onProgress?.(done, rows.length);
+  });
 }
 
 export async function updateRow(id: string, data: Record<string, string>) {
@@ -56,8 +78,8 @@ export async function deleteRows(ids: string[], month: number, year: number) {
   }
   await supabase.from("month_wise_upload").update({ updated_at: new Date().toISOString() }).eq("month", month).eq("year", year);
 }
-/** Delete a whole month by month/year (short request, no id list). */
+/** Delete a whole month in one fast server call. */
 export async function deleteMonth(month: number, year: number) {
-  const { error } = await supabase.from("month_wise_upload").delete().eq("month", month).eq("year", year);
+  const { error } = await supabase.rpc("delete_month_wise_upload", { _month: month, _year: year });
   if (error) throw error;
 }

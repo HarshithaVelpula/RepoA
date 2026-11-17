@@ -11,11 +11,16 @@ export const monthWiseStockQuery = {
   queryKey: ["month-wise-stock", "v1"] as const,
   queryFn: async (): Promise<StockRow[]> => {
     const raw: { id: string; month: number; year: number; data: Record<string, string> }[] = [];
-    for (let from = 0; ; from += 1000) {
-      const { data, error } = await supabase.from("month_wise_upload").select("id,month,year,data").order("year").order("month").order("id").range(from, from + 999);
+    let last: string | null = null;
+    for (;;) {
+      let q = supabase.from("month_wise_upload").select("id,month,year,data").order("id").limit(1000);
+      if (last) q = q.gt("id", last);
+      const { data, error } = await q;
       if (error) throw error;
-      raw.push(...((data ?? []) as unknown as typeof raw));
-      if (!data || data.length < 1000) break;
+      const rows = (data ?? []) as unknown as typeof raw;
+      raw.push(...rows);
+      if (rows.length < 1000) break;
+      last = rows[rows.length - 1]!.id;
     }
     const [zpc, val] = await Promise.all([masterRows("zpc_group"), masterRows("valuation_subgroup")]);
     return mapStockRows(raw, valuationLookup(val), zpcLookup(zpc));

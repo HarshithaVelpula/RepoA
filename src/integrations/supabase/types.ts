@@ -4285,6 +4285,10 @@ export type Database = {
       current_access_plants: { Args: never; Returns: string[] }
       current_access_profit_centers: { Args: never; Returns: string[] }
       current_access_unrestricted: { Args: never; Returns: boolean }
+      delete_month_wise_upload: {
+        Args: { _month: number; _year: number }
+        Returns: number
+      }
       finish_sync_run: {
         Args: {
           _duration_ms?: number
@@ -4315,6 +4319,17 @@ export type Database = {
       is_data_admin: { Args: { _user_id: string }; Returns: boolean }
       is_super_admin: { Args: { _user_id: string }; Returns: boolean }
       list_sap_credential_keys: { Args: never; Returns: string[] }
+      month_wise_upload_page: {
+        Args: {
+          _limit: number
+          _month: number
+          _offset: number
+          _search: string
+          _year: number
+        }
+        Returns: Json
+      }
+      mwu_can_manage: { Args: never; Returns: boolean }
       net_sales_summary:
         | {
             Args: never
