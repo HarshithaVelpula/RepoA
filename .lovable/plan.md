@@ -1,12 +1,14 @@
-# Month Wise Stock: lock the current month in the Month filter
+# Month Wise Stock: ZKEYRM Comparison prices in ₹ Cr
 
-## What changes
-- The current month (or, if it has no data yet, the latest earlier month — e.g. Oct-2026 when Nov isn't uploaded) always stays ticked in the Month dropdown.
-- Unticking it is blocked and a message appears: "Oct-2026 is the latest month and can't be unchecked."
-- "Deselect All" keeps the latest month ticked (and shows the same message); "Select All" works as now.
-- Other months can still be ticked/unticked freely, so Month Wise Inventory still compares them, while all other cards keep showing the latest month.
-- Reset returns to only the latest month.
+Only on the Month Wise Stock screen (Purchase Register and Purchase Orders List stay unchanged), every rupee figure in the ZKEYRM Comparison card shows in ₹ Cr:
 
-## Technical details
-- In month-wise-stock-dashboard.tsx, wrap the Month onChange: if the new selection lacks the locked period (defaultPeriod result), re-add it and show a sonner toast warning.
-- Locked month also forced when the current selection is null/"all" (no change needed there).
+- Tile "Unit Price (₹)" becomes "Unit Price (₹ Cr)". Example: 7,30,000.00 becomes 0.07 (4 decimals, so 0.0730, keeps small prices readable).
+- Tile "Unit Price Variance (MoM)" shows the change in ₹ Cr. The % stays the same.
+- Chart bars, labels, Y-axis and tooltip "Avg Price" show ₹ Cr.
+- Table columns "Avg Price", "vs prev month" and "Diff from first" show ₹ Cr, with "(₹ Cr)" in their headings. Same for the material list and the detail popup prices.
+- The Excel download from this card uses the same ₹ Cr values and headings.
+- Total Procurement Value and PO Val are already in ₹ Cr. Quantity is unchanged.
+
+## Technical
+- Add an optional `priceInCr` prop to ZrmmatCompareCard. When set, divide prices and differences by 1e7 and format with 4 decimals. Label suffixes change from "(₹)" to "(₹ Cr)".
+- Pass `priceInCr` from month-wise-stock-dashboard.tsx only.
