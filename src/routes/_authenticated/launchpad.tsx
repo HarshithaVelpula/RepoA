@@ -106,15 +106,16 @@ function Launchpad() {
 }
 function MonthWiseStockTile({ href }: { href: string }) {
   const q = useQuery(monthWiseStockQuery);
-  const rows = q.data ?? [];
-  const latest = rows.reduce((m, r) => (r.period > m ? r.period : m), "");
+  const all = q.data ?? [];
+  const latest = all.reduce((m, r) => (r.period > m ? r.period : m), "");
+  const rows = all.filter((r) => r.period === latest);
   const total = rows.reduce((s, r) => s + r.value, 0);
   const byType = new Map<string, number>();
   for (const r of rows) if (r.type) byType.set(r.type, (byType.get(r.type) ?? 0) + r.value);
   const types = [...byType].sort((a, b) => b[1] - a[1]);
   const shown = types.slice(0, 6);
   const cr = (v: number) => (v / 1e7).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return <TableStatusTile title="Month Wise Stock" value={q.isLoading ? "…" : latest ? `₹ ${cr(total)} Cr` : "No data"} note={latest ? "Total Inv Val (₹ Cr) · All months" : "Inventory"} href={href} accent={5}>
+  return <TableStatusTile title="Month Wise Stock" value={q.isLoading ? "…" : latest ? `₹ ${cr(total)} Cr` : "No data"} note={latest ? `Total Inv Val (₹ Cr) · ${latest}` : "Inventory"} href={href} accent={5}>
     {shown.length > 0 && <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
       {shown.map(([t, v]) => <li key={t} className="flex justify-between gap-1"><span className="truncate text-muted-foreground" title={t}>{t}</span><span className="font-semibold tabular-nums text-foreground">{cr(v)}</span></li>)}
       {types.length > shown.length && <li className="col-span-2 text-muted-foreground">+{types.length - shown.length} more</li>}

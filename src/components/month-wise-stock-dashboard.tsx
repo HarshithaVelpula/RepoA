@@ -11,7 +11,7 @@ import { OrderBookSubGroupChart } from "@/components/order-book-subgroup-chart";
 import { summarizeGroupsByDivision } from "@/lib/open-orders-groups";
 import { FilterMultiSelect } from "@/components/filter-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { sumBy, topWithOthers, toPurchaseRows, type StockRow } from "@/lib/month-wise-stock-map";
+import { sumBy, latestPeriod, topWithOthers, toPurchaseRows, type StockRow } from "@/lib/month-wise-stock-map";
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const crv = (v: number) => (v / 1e7).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,8 +34,9 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const opts = useMemo(() => ({ plant: opt(plantName), type: opt((r) => r.type) }), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
   const filtered = useMemo(() => rows.filter((r) => (!f.plants || f.plants.includes(plantName(r))) && (!f.types || f.types.includes(r.type))
     && (!months || months.includes(r.period))), [rows, f, months]);
-  // Tiles and cards add up every month in the selected range (All = every month).
-  const cur = filtered;
+  // Month Wise Inventory uses every selected month; all other tiles/cards use the latest selected month.
+  const lp = latestPeriod(months ?? periods);
+  const cur = useMemo(() => filtered.filter((r) => r.period === lp), [filtered, lp]);
   const total = cur.reduce((s, r) => s + r.value, 0);
   const types = sumBy(cur, (r) => r.type);
   const tw = topWithOthers(types, 10);
@@ -43,10 +44,10 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const zk = useMemo(() => toPurchaseRows(filtered), [filtered]);
   const MS = "col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0";
   const field = (k: "plants" | "types", o: string[], label: string) => <div className={MS}><FilterMultiSelect label={label} selected={f[k]} options={o} onChange={(v) => setF({ ...f, [k]: v.length === o.length ? null : v })} placeholder="All" /></div>;
-  const sub = !months || months.length === periods.length ? "All months" : months.length ? [...months].sort().map(pl).join(", ") : "No months";
+  const sub = lp ? pl(lp) : "No months";
   const gCard = (title: string, k: (r: StockRow) => string, tint: Tint) => {
     const g = summarizeGroupsByDivision(cur.filter((r) => k(r)).map((r) => ({ name: k(r), value: r.value / 1e7, order: r.key, division: r.plant })), (r) => r.name);
-    return <Card tint={tint} title={title} sub="₹ Cr">{g.groups.length ? <OrderBookSubGroupChart groups={g.groups} divisions={g.divisions} groupLabel={title} /> : <p className="py-8 text-center text-xs text-muted-foreground">No data</p>}</Card>;
+    return <Card tint={tint} title={title} sub={`${sub} · ₹ Cr`}>{g.groups.length ? <OrderBookSubGroupChart groups={g.groups} divisions={g.divisions} groupLabel={title} /> : <p className="py-8 text-center text-xs text-muted-foreground">No data</p>}</Card>;
   };
   const groupCard = (title: string, k: (r: StockRow) => string, tint: Tint) => <Card tint={tint} title={title} sub={`${sub} · ₹ Cr`}><BarList data={sumBy(cur, k).slice(0, 10)} fmt={crv} /></Card>;
 
@@ -65,7 +66,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
     </div>
 
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">
-      <Card tint="teal" title="Month Wise Inventory" sub="CB Val · ₹ Cr"><div className="h-64"><ResponsiveContainer><ComposedChart data={monthly} margin={{ top: 18, left: 10, right: 8 }}>
+      <Card tint="teal" title="Month Wise Inventory" sub={`${months && months.length !== periods.length ? `${months.length} month(s)` : "All months"} · CB Val · ₹ Cr`}><div className="h-64"><ResponsiveContainer><ComposedChart data={monthly} margin={{ top: 18, left: 10, right: 8 }}>
         <defs>{Array.from({ length: 10 }, (_, i) => <linearGradient key={i} id={`mws-g${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={radiantColor(i)} /><stop offset="100%" stopColor={radiantColor(i)} stopOpacity={0.45} /></linearGradient>)}</defs><CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--foreground)", fontWeight: 600 }} /><YAxis tick={{ fontSize: 10, fill: "var(--foreground)" }} tickFormatter={(v: number) => (v / 1e7).toFixed(0)} />
         <Tooltip formatter={(v: number) => crv(v)} />
         <Bar dataKey="value" name="CB Val" radius={[6, 6, 0, 0]} maxBarSize={44}>{monthly.map((_, i) => <Cell key={i} fill={`url(#mws-g${i % 10})`} />)}<LabelList dataKey="value" position="top" formatter={(v: number) => crv(v)} style={{ fontSize: 9, fontWeight: 700, fill: "var(--foreground)" }} /></Bar>
@@ -92,7 +93,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
 
     <ZrmmatCompareCard rows={zk} emptyLabel="no stock in selected months" />
 
-    <div data-pdf-exclude><DetailsTable rows={filtered} /></div>
+    <div data-pdf-exclude><DetailsTable rows={cur} /></div>
   </div>;
 }
 

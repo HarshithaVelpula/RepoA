@@ -35,3 +35,9 @@ _it("skips Excel total row without ValCl and material", () => {
   ], new Map(), new Map());
   _ex(rows.map((r) => r.key)).toEqual(["1"]);
 });
+
+import { latestPeriod as lpTest } from "./month-wise-stock-map";
+describe("latestPeriod", () => {
+  it("picks the latest selected month", () => { expect(lpTest(["2026-08", "2026-10", "2026-09"])).toBe("2026-10"); });
+  it("is empty with no months", () => { expect(lpTest([])).toBe(""); });
+});

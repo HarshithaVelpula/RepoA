@@ -60,3 +60,8 @@ export function topWithOthers<T extends { name: string; value: number }>(list: T
   const sorted = [...list].sort((a, b) => b.value - a.value);
   return { top: sorted.slice(0, n), others: sorted.slice(n) };
 }
+
+/** Latest YYYY-MM period in the list ("" when empty). */
+export function latestPeriod(periods: readonly string[]): string {
+  return periods.reduce((m, p) => (p > m ? p : m), "");
+}
