@@ -30,7 +30,11 @@ export const zrmmatRowsQuery = {
   staleTime: Infinity,
 };
 
-export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected period" }: { rows: PurchaseRow[]; emptyLabel?: string }) {
+export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected period", priceInCr = false }: { rows: PurchaseRow[]; emptyLabel?: string; priceInCr?: boolean }) {
+  const D = priceInCr ? 1e7 : 1, dp = priceInCr ? 4 : 2, U = priceInCr ? "₹ Cr" : "₹";
+  const fv = (v: number) => v.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const pf = (v: number) => fv(v / D);
+  const ps = (v: number | null) => (v == null ? "–" : `${v > 0 ? "+" : ""}${pf(v)}`);
   const q = useQuery({ ...zrmmatRowsQuery, refetchOnWindowFocus: false });
   const mats = useMemo(() => zrmmatMaterials(q.data ?? []), [q.data]);
   const names = useMemo(() => { const m = new Map<string, string>(); for (const r of rows) m.set(normMat(r.material), r.materialName); return m; }, [rows]);
@@ -51,19 +55,19 @@ export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected 
     { label: "Total Procurement Value (₹ Cr)", value: cr(sum.valueInr) },
     { label: "Total Quantity", value: `${n2(sum.qty)} ${current ? sum.unit : ""}` },
     { label: "PO / Documents", value: sum.docs.toLocaleString("en-IN") },
-    { label: "Unit Price (₹)", value: current ? n2(sum.price) : "–", hint: "Total value ÷ total quantity" },
-    { label: "Unit Price Variance (MoM)", value: current ? `${sign(sum.latestMom)}${sum.latestMomPct != null ? ` (${sign(sum.latestMomPct)}%)` : ""}` : "–", hint: "Latest month vs previous month" },
+    { label: `Unit Price (${U})`, value: current ? pf(sum.price) : "–", hint: "Total value ÷ total quantity" },
+    { label: "Unit Price Variance (MoM)", value: current ? `${ps(sum.latestMom)}${sum.latestMomPct != null ? ` (${sign(sum.latestMomPct)}%)` : ""}` : "–", hint: "Latest month vs previous month" },
   ];
 
   const exportXlsx = async () => {
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("ZKEYRM Compare");
     if (current) {
-      ws.addRow(["Month", "Quantity", "PO Val (₹ Cr)", "Unit Price (₹)", "vs prev (₹)", "vs prev (%)", "Diff from first (₹)"]);
-      series.forEach((p) => ws.addRow([ml(p.month), p.qty, p.valueInr / 1e7, p.price, p.mom, p.momPct, p.fromFirst]));
+      ws.addRow(["Month", "Quantity", "PO Val (₹ Cr)", `Unit Price (${U})`, `vs prev (${U})`, "vs prev (%)", `Diff from first (${U})`]);
+      series.forEach((p) => ws.addRow([ml(p.month), p.qty, p.valueInr / 1e7, p.price / D, p.mom == null ? null : p.mom / D, p.momPct, p.fromFirst == null ? null : p.fromFirst / D]));
     } else {
-      ws.addRow(["Material", "Description", "Quantity", "Value (₹ Cr)", "Unit Price (₹)", "Latest MoM (₹)", "Latest MoM (%)"]);
-      perMat.forEach((p) => ws.addRow([p.m.material, names.get(p.m.material) ?? "", p.s.qty, p.s.valueInr / 1e7, p.s.price, p.s.latestMom, p.s.latestMomPct]));
+      ws.addRow(["Material", "Description", "Quantity", "Value (₹ Cr)", `Unit Price (${U})`, `Latest MoM (${U})`, "Latest MoM (%)"]);
+      perMat.forEach((p) => ws.addRow([p.m.material, names.get(p.m.material) ?? "", p.s.qty, p.s.valueInr / 1e7, p.s.price / D, p.s.latestMom == null ? null : p.s.latestMom / D, p.s.latestMomPct]));
     }
     const buf = await wb.xlsx.writeBuffer();
     const url = URL.createObjectURL(new Blob([buf])); const a = document.createElement("a");
@@ -107,9 +111,9 @@ export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected 
         </div>)}
       </div>
       {current ? <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2">
-        <div className="h-60"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={series.map((p) => ({ m: ml(p.month), price: +p.price.toFixed(2) }))} margin={{ top: 30 }}>
-          <CartesianGrid strokeDasharray="3 3" opacity={0.3} /><XAxis dataKey="m" fontSize={10} /><YAxis fontSize={10} tickFormatter={(v: number) => n2(v)} domain={[(min: number) => { const max = Math.max(...series.map((p) => p.price)); const pad = Math.max((max - min) * 0.5, min * 0.01); return Math.max(0, +(min - pad).toFixed(2)); }, (max: number) => { const min = Math.min(...series.map((p) => p.price)); const pad = Math.max((max - min) * 0.1, max * 0.005); return +(max + pad).toFixed(2); }]} />
-          <Tooltip formatter={(v: number) => [`₹ ${n2(v)}`, "Avg Price"]} />
+        <div className="h-60"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={series.map((p) => ({ m: ml(p.month), price: +(p.price / D).toFixed(dp + 2) }))} margin={{ top: 30 }}>
+          <CartesianGrid strokeDasharray="3 3" opacity={0.3} /><XAxis dataKey="m" fontSize={10} /><YAxis fontSize={10} tickFormatter={(v: number) => fv(v)} domain={[(min: number) => { const max = Math.max(...series.map((p) => p.price / D)); const pad = Math.max((max - min) * 0.5, min * 0.01); return Math.max(0, +(min - pad).toFixed(dp + 2)); }, (max: number) => { const min = Math.min(...series.map((p) => p.price / D)); const pad = Math.max((max - min) * 0.1, max * 0.005); return +(max + pad).toFixed(dp + 2); }]} />
+          <Tooltip formatter={(v: number) => [`${U} ${fv(v)}`, "Avg Price"]} />
           <defs>
             {series.map((p, i) => <linearGradient key={p.month} id={`zr-g-${i}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={radiantColor(i)} stopOpacity={0.95} />
@@ -121,24 +125,24 @@ export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected 
           </Bar>
           <Line type="monotone" dataKey="price" name="Trend" stroke="#d64550" strokeWidth={2} dot={{ r: 3, strokeWidth: 1.5, fill: "white" }} activeDot={{ r: 5 }} legendType="none" tooltipType="none">
             <LabelList dataKey="price" content={(props: any) => {
-              const x = Number(props.x), y = Number(props.y), t = n2(Number(props.value)); const w = t.length * 6 + 10;
+              const x = Number(props.x), y = Number(props.y), t = fv(Number(props.value)); const w = t.length * 6 + 10;
               return <g><rect x={x - w / 2} y={y - 26} width={w} height={16} rx={4} fill="white" stroke="#cbd5e1" strokeWidth={0.75} /><text x={x} y={y - 15} textAnchor="middle" fontSize={10} fontWeight={700} fill="#1e293b" stroke="none">{t}</text></g>;
             }} />
           </Line>
         </ComposedChart></ResponsiveContainer></div>
         <div className="max-h-60 overflow-auto"><table className="w-full text-[11px]">
-          <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["Month", "Qty", "PO Val (₹ Cr)", "Avg Price", "vs prev month", "Diff from first (₹)", "Dtls"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
+          <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["Month", "Qty", "PO Val (₹ Cr)", `Avg Price (${U})`, `vs prev month (${U})`, `Diff from first (${U})`, "Dtls"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
           <tbody>{series.map((p) => <tr key={p.month} className="border-t border-border/60">
-            <td className="px-1.5 py-0.5">{ml(p.month)}</td><td className="px-1.5 tabular-nums">{n2(p.qty)}</td><td className="px-1.5 tabular-nums">{cr(p.valueInr)}</td><td className="px-1.5 tabular-nums">{n2(p.price)}</td>
-            <td className={`px-1.5 tabular-nums ${tone(p.mom)}`}>{sign(p.mom)}{p.momPct != null ? ` (${sign(p.momPct)}%)` : ""}</td><td className={`px-1.5 tabular-nums ${tone(p.fromFirst)}`}>{sign(p.fromFirst)}</td>
+            <td className="px-1.5 py-0.5">{ml(p.month)}</td><td className="px-1.5 tabular-nums">{n2(p.qty)}</td><td className="px-1.5 tabular-nums">{cr(p.valueInr)}</td><td className="px-1.5 tabular-nums">{pf(p.price)}</td>
+            <td className={`px-1.5 tabular-nums ${tone(p.mom)}`}>{ps(p.mom)}{p.momPct != null ? ` (${sign(p.momPct)}%)` : ""}</td><td className={`px-1.5 tabular-nums ${tone(p.fromFirst)}`}>{ps(p.fromFirst)}</td>
             <td className="px-1.5"><Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" title="View" aria-label="View" onClick={() => setDetailMonth(p.month)}><Eye className="size-3" /></Button></td>
           </tr>)}</tbody>
         </table>{!series.length ? <p className="p-3 text-xs text-muted-foreground">No purchases of this material in the selected period.</p> : null}</div>
       </div> : <div className="mt-2 max-h-72 overflow-auto"><table className="w-full text-[11px]">
-        <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["Material", "Description", "Qty", "Value (₹ Cr)", "Unit Price (₹)", "Latest MoM"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
+        <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["Material", "Description", "Qty", "Value (₹ Cr)", `Unit Price (${U})`, "Latest MoM"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
         <tbody>{[...perMat].filter((p) => p.rs.length).sort((a, b) => b.s.valueInr - a.s.valueInr).map((p) => <tr key={p.m.material} onClick={() => setSel(p.m.material)} className="cursor-pointer border-t border-border/60 hover:bg-muted">
-          <td className="px-1.5 py-0.5 font-medium text-primary">{p.m.material}</td><td className="truncate px-1.5">{names.get(p.m.material)}</td><td className="px-1.5 tabular-nums">{n2(p.s.qty)} {p.s.unit}</td><td className="px-1.5 tabular-nums">{cr(p.s.valueInr)}</td><td className="px-1.5 tabular-nums">{n2(p.s.price)}</td>
-          <td className={`px-1.5 tabular-nums ${tone(p.s.latestMom)}`}>{sign(p.s.latestMom)}{p.s.latestMomPct != null ? ` (${sign(p.s.latestMomPct)}%)` : ""}</td>
+          <td className="px-1.5 py-0.5 font-medium text-primary">{p.m.material}</td><td className="truncate px-1.5">{names.get(p.m.material)}</td><td className="px-1.5 tabular-nums">{n2(p.s.qty)} {p.s.unit}</td><td className="px-1.5 tabular-nums">{cr(p.s.valueInr)}</td><td className="px-1.5 tabular-nums">{pf(p.s.price)}</td>
+          <td className={`px-1.5 tabular-nums ${tone(p.s.latestMom)}`}>{ps(p.s.latestMom)}{p.s.latestMomPct != null ? ` (${sign(p.s.latestMomPct)}%)` : ""}</td>
         </tr>)}</tbody>
       </table></div>}
     </>}
@@ -146,16 +150,16 @@ export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected 
       <DialogContent className="max-w-5xl">
         <DialogHeader><DialogTitle className="text-sm">{current?.m.material} {names.get(current?.m.material ?? "") ?? ""} — {detailMonth ? ml(detailMonth) : ""} ({detailRows.length} items)</DialogTitle></DialogHeader>
         <div className="max-h-[60vh] overflow-auto"><table className="w-full text-[11px]">
-          <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["#", "Posting Date", "Invoice Doc", "GR Doc", "Plant", "Vendor", "Invoice Qty", "Net Amount (₹)", "Unit Price (₹)"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
+          <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["#", "Posting Date", "Invoice Doc", "GR Doc", "Plant", "Vendor", "Invoice Qty", `Net Amount (${U})`, `Unit Price (${U})`].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
           <tbody>{detailRows.map((r, i) => <tr key={`${r.docNo}-${i}`} className="border-t border-border/60 odd:bg-muted/40">
             <td className="px-1.5 py-0.5">{i + 1}</td><td className="px-1.5">{r.date.split("-").reverse().join("-")}</td><td className="px-1.5">{r.docNo}</td><td className="px-1.5">{r.grNo}</td>
             <td className="px-1.5">{r.plant}{r.plantSh ? ` - ${r.plantSh}` : ""}</td><td className="truncate px-1.5">{r.vendorName}</td>
-            <td className="px-1.5 tabular-nums">{n2(r.qty ?? 0)} {r.unit}</td><td className="px-1.5 tabular-nums">{n2(r.value * 1e7)}</td><td className="px-1.5 tabular-nums">{n2(r.qty ? (r.value * 1e7) / r.qty : r.rate ?? 0)}</td>
+            <td className="px-1.5 tabular-nums">{n2(r.qty ?? 0)} {r.unit}</td><td className="px-1.5 tabular-nums">{pf(r.value * 1e7)}</td><td className="px-1.5 tabular-nums">{pf(r.qty ? (r.value * 1e7) / r.qty : r.rate ?? 0)}</td>
           </tr>)}</tbody>
           <tfoot><tr className="border-t-2 border-border font-bold"><td className="px-1.5 py-1" colSpan={6}>Grand Total</td>
             <td className="px-1.5 tabular-nums">{n2(detailRows.reduce((s, r) => s + (r.qty ?? 0), 0))}</td>
-            <td className="px-1.5 tabular-nums">{n2(detailRows.reduce((s, r) => s + r.value * 1e7, 0))}</td>
-            <td className="px-1.5 tabular-nums">{(() => { const q = detailRows.reduce((s, r) => s + (r.qty ?? 0), 0); return q ? n2(detailRows.reduce((s, r) => s + r.value * 1e7, 0) / q) : "–"; })()}</td></tr></tfoot>
+            <td className="px-1.5 tabular-nums">{pf(detailRows.reduce((s, r) => s + r.value * 1e7, 0))}</td>
+            <td className="px-1.5 tabular-nums">{(() => { const q = detailRows.reduce((s, r) => s + (r.qty ?? 0), 0); return q ? pf(detailRows.reduce((s, r) => s + r.value * 1e7, 0) / q) : "–"; })()}</td></tr></tfoot>
         </table></div>
       </DialogContent>
     </Dialog>
