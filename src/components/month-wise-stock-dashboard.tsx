@@ -38,7 +38,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const cur = filtered;
   const total = cur.reduce((s, r) => s + r.value, 0);
   const types = sumBy(cur, (r) => r.type);
-  const tw = topWithOthers(types, 5);
+  const tw = topWithOthers(types, 10);
   const monthly = useMemo(() => { const m = new Map<string, number>(); for (const r of filtered) m.set(r.period, (m.get(r.period) ?? 0) + r.value); return [...m.entries()].sort().map(([k, v]) => ({ name: pl(k), value: v })); }, [filtered]);
   const zk = useMemo(() => toPurchaseRows(filtered), [filtered]);
   const MS = "col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0";
@@ -61,7 +61,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
 
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
       <Tile icon={<IndianRupee className="size-5" />} label="Total Inv" value={crv(total)} tone="#1f6fd1" />
-      {types.filter((t) => t.value !== 0).map((t, i) => <Tile key={t.name} icon={<IndianRupee className="size-5" />} label={t.name} value={crv(t.value)} tone={TONES[i % TONES.length] ?? "#64748b"} />)}
+      {types.filter((t) => t.value !== 0).slice(0, 5).map((t, i) => <Tile key={t.name} icon={<IndianRupee className="size-5" />} label={t.name} value={crv(t.value)} tone={TONES[i % TONES.length] ?? "#64748b"} />)}
     </div>
 
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">
@@ -70,7 +70,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
         <Tooltip formatter={(v: number) => crv(v)} />
         <Bar dataKey="value" name="CB Val" radius={[6, 6, 0, 0]} maxBarSize={44}>{monthly.map((_, i) => <Cell key={i} fill={`url(#mws-g${i % 10})`} />)}<LabelList dataKey="value" position="top" formatter={(v: number) => crv(v)} style={{ fontSize: 9, fontWeight: 700, fill: "var(--foreground)" }} /></Bar>
       </ComposedChart></ResponsiveContainer></div></Card>
-      <Card tint="sky" title="Top Types" sub={`${sub} · ₹ Cr`}><BarList data={tw.top} fmt={crv} />{tw.others.length ? <button type="button" data-pdf-exclude onClick={() => setShowOthers(true)} className="mt-2 w-full rounded-md border border-border px-2 py-1 text-left text-[11px] font-semibold text-primary hover:bg-muted">Others ({tw.others.length}) · ₹ {crv(tw.others.reduce((a, o) => a + o.value, 0))} Cr — view</button> : null}</Card>
+      <Card tint="sky" title="Top 10 Types" sub={`${sub} · ₹ Cr`}><BarList data={tw.top} fmt={crv} />{tw.others.length ? <button type="button" data-pdf-exclude onClick={() => setShowOthers(true)} className="mt-2 w-full rounded-md border border-border px-2 py-1 text-left text-[11px] font-semibold text-primary hover:bg-muted">Others ({tw.others.length}) · ₹ {crv(tw.others.reduce((a, o) => a + o.value, 0))} Cr — view</button> : null}</Card>
       <Dialog open={showOthers} onOpenChange={setShowOthers}><DialogContent className="max-w-md"><DialogHeader><DialogTitle>Other Types (₹ Cr)</DialogTitle></DialogHeader><BarList data={tw.others} fmt={crv} /></DialogContent></Dialog>
     </div>
 
