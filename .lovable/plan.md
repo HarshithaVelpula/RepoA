@@ -3,6 +3,9 @@
 ## Why it is slow
 Both the screen and the launchpad card download every uploaded row for every month (60,000+ per month) in 1,000-row batches, one after another. Production stores more months, so it is much slower there.
 
+## Which month is "latest"
+It is the current calendar month. If that month has no data, it falls back to the most recent earlier month that has data. For example, if November isn't uploaded, October is used. Months after the current month are never picked as the default. This applies to the launchpad and to the screen's default selection.
+
 ## Fix (filter by the Month and Year columns)
 1. **Launchpad card:** reads only the latest uploaded month, already totalled in the database. It shows the ₹ Cr total and the top types almost instantly.
 2. **Screen opens fast:** the tiles, Top 10 Types, Top 15 Plants, Top 10 Materials, Main/Sub Group cards and the table load only the latest selected month. This is a single month's data, filtered by Month and Year.
