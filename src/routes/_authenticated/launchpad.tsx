@@ -1,4 +1,5 @@
 import { monthWiseStockQuery } from "@/lib/month-wise-stock-data";
+import { defaultPeriod, nowPeriodIST } from "@/lib/month-wise-stock-map";
 import type * as React from "react";
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
@@ -107,7 +108,8 @@ function Launchpad() {
 function MonthWiseStockTile({ href }: { href: string }) {
   const q = useQuery(monthWiseStockQuery);
   const all = q.data ?? [];
-  const latest = all.reduce((m, r) => (r.period > m ? r.period : m), "");
+  const ps = [...new Set(all.map((r) => r.period))];
+  const latest = defaultPeriod(ps, nowPeriodIST()) || ps.sort().at(-1) || "";
   const rows = all.filter((r) => r.period === latest);
   const total = rows.reduce((s, r) => s + r.value, 0);
   const byType = new Map<string, number>();

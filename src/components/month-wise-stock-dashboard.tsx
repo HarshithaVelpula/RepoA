@@ -11,7 +11,9 @@ import { OrderBookSubGroupChart } from "@/components/order-book-subgroup-chart";
 import { summarizeGroupsByDivision } from "@/lib/open-orders-groups";
 import { FilterMultiSelect } from "@/components/filter-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { sumBy, latestPeriod, lastNMonthsByType, topWithOthers, toPurchaseRows, type StockRow } from "@/lib/month-wise-stock-map";
+import { useQuery } from "@tanstack/react-query";
+import { monthWiseStockMonthQuery } from "@/lib/month-wise-stock-data";
+import { sumBy, defaultPeriod, nowPeriodIST, latestPeriod, lastNMonthsByType, topWithOthers, toPurchaseRows, type StockRow } from "@/lib/month-wise-stock-map";
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const crv = (v: number) => (v / 1e7).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -27,7 +29,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const [collapsed, setCollapsed] = useState(true);
   const [showOthers, setShowOthers] = useState(false);
   const periods = useMemo(() => [...new Set(rows.map((r) => r.period))].sort(), [rows]);
-  const defaultMonths = useMemo(() => { const now = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 7); return periods.includes(now) ? [now] : periods.length ? [periods[periods.length - 1] as string] : null; }, [periods]);
+  const defaultMonths = useMemo(() => { const d = defaultPeriod(periods, nowPeriodIST()); return d ? [d] : periods.length ? [periods[periods.length - 1] as string] : null; }, [periods]);
   const [monthSel, setMonthSel] = useState<string[] | null | undefined>(undefined);
   const months = monthSel === undefined ? defaultMonths : monthSel;
   const opt = (k: (r: StockRow) => string) => [...new Set(rows.map(k).filter(Boolean))].sort();
@@ -102,8 +104,16 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
 
     <ZrmmatCompareCard rows={zk} emptyLabel="no stock in selected months" />
 
-    <div data-pdf-exclude><DetailsTable rows={cur} /></div>
+    <div data-pdf-exclude><MonthDetails period={lp} plants={f.plants} types={f.types} /></div>
   </div>;
+}
+
+function MonthDetails({ period, plants, types }: { period: string; plants: string[] | null; types: string[] | null }) {
+  const q = useQuery(monthWiseStockMonthQuery(period));
+  const rows = useMemo(() => (q.data ?? []).filter((r) => (!plants || plants.includes(plantName(r))) && (!types || types.includes(r.type))), [q.data, plants, types]);
+  if (q.isError) return <p className="p-3 text-xs text-destructive">{(q.error as Error).message}</p>;
+  if (q.isLoading) return <section className="rounded-xl border border-border p-6 text-center text-xs text-muted-foreground shadow-sm" style={TINTS.neutral}>Loading stock details…</section>;
+  return <DetailsTable rows={rows} />;
 }
 
 const HEADS = ["Month", "Plant", "Location", "Material", "Description", "Profit Centre", "Val Class", "Type", "Matl Group", "Main Group", "Sub Group 1", "Sub Group 2", "Sub Group 3", "UOM", "CB Qty", "CB Val"];

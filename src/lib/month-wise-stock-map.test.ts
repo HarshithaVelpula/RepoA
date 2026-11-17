@@ -60,3 +60,10 @@ describe("lastNMonthsByType latest-month types", () => {
     expect(r.data.map((d) => d.name)).toEqual(["A"]);
   });
 });
+
+import { defaultPeriod } from "./month-wise-stock-map";
+describe("defaultPeriod", () => {
+  it("uses current month when uploaded", () => expect(defaultPeriod(["2026-10", "2026-11"], "2026-11")).toBe("2026-11"));
+  it("falls back to Oct when Nov not uploaded", () => expect(defaultPeriod(["2026-09", "2026-10"], "2026-11")).toBe("2026-10"));
+  it("ignores future months", () => expect(defaultPeriod(["2026-10", "2026-12"], "2026-11")).toBe("2026-10"));
+});

@@ -1,7 +1,7 @@
 import hblLogo from "@/assets/hbl-logo.png";
 import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileDown, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { AccessDenied, ReportShell } from "@/components/report-shell";
@@ -33,6 +33,7 @@ function Page() {
   const { data, isLoading } = useLaunchpad();
   const allowed = data?.isSuperAdmin || hasScreen(data?.screens, "inv.month-wise-stock");
   const q = useQuery({ ...monthWiseStockQuery, enabled: !!allowed });
+  const qc = useQueryClient();
   const ref = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const pdf = async () => {
@@ -43,7 +44,7 @@ function Page() {
   const ps = [...new Set((q.data ?? []).map((r) => r.period))].sort();
   const actions = <>
     <span className="text-xs text-muted-foreground"><span className="font-medium">Data available:</span> {ps.length ? `${pl(ps[0] ?? "")} – ${pl(ps[ps.length - 1] ?? "")}` : "No data"}</span>
-    <Button type="button" variant="action" size="sm" className="h-7 text-xs" onClick={() => void q.refetch()} disabled={q.isFetching}><RefreshCw className={`size-3.5 ${q.isFetching ? "animate-spin" : ""}`} />Refresh</Button>
+    <Button type="button" variant="action" size="sm" className="h-7 text-xs" onClick={() => { void qc.invalidateQueries({ queryKey: ["month-wise-stock", "rows"] }); void q.refetch(); }} disabled={q.isFetching}><RefreshCw className={`size-3.5 ${q.isFetching ? "animate-spin" : ""}`} />Refresh</Button>
     <Button type="button" variant="export" size="sm" className="h-7 text-xs" onClick={pdf} disabled={busy}><FileDown className="size-3.5" />PDF</Button>
   </>;
   return <ReportShell title="Month Wise Stock" compact actions={allowed ? actions : undefined}>

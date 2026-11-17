@@ -81,3 +81,9 @@ export function lastNMonthsByType(rows: StockRow[], periods: readonly string[], 
     .filter((d) => (Number(d[last]) || 0) !== 0).sort((a, b) => (Number(b[last]) || 0) - (Number(a[last]) || 0)).slice(0, top);
   return { months, data };
 }
+
+/** Current IST month if uploaded, else the most recent earlier uploaded month; future months are never the default. */
+export function defaultPeriod(periods: readonly string[], now: string): string {
+  return periods.filter((p) => p <= now).reduce((m, p) => (p > m ? p : m), "");
+}
+export const nowPeriodIST = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 7);

@@ -316,6 +316,13 @@
       "when": 1794895224752,
       "tag": "0044_month_wise_upload_fast",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794910102037,
+      "tag": "0045_month_wise_stock_totals",
+      "breakpoints": true
     }
   ]
 }

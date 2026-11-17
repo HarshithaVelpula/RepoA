@@ -4319,6 +4319,7 @@ export type Database = {
       is_data_admin: { Args: { _user_id: string }; Returns: boolean }
       is_super_admin: { Args: { _user_id: string }; Returns: boolean }
       list_sap_credential_keys: { Args: never; Returns: string[] }
+      month_wise_stock_totals: { Args: never; Returns: Json }
       month_wise_upload_page: {
         Args: {
           _limit: number
