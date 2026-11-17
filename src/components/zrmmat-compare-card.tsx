@@ -112,7 +112,7 @@ export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected 
       </div>
       {current ? <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2">
         <div className="h-60"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={series.map((p) => ({ m: ml(p.month), price: +(p.price / D).toFixed(dp + 2) }))} margin={{ top: 30 }}>
-          <CartesianGrid strokeDasharray="3 3" opacity={0.3} /><XAxis dataKey="m" fontSize={10} /><YAxis fontSize={10} tickFormatter={(v: number) => fv(v)} domain={[(min: number) => { const max = Math.max(...series.map((p) => p.price / D)); const pad = Math.max((max - min) * 0.5, min * 0.01); return Math.max(0, +(min - pad).toFixed(dp + 2)); }, (max: number) => { const min = Math.min(...series.map((p) => p.price / D)); const pad = Math.max((max - min) * 0.1, max * 0.005); return +(max + pad).toFixed(dp + 2); }]} />
+          <CartesianGrid strokeDasharray="3 3" opacity={0.3} /><XAxis dataKey="m" fontSize={10} /><YAxis fontSize={10} width={Math.max(60, Math.max(0, ...series.map((p) => fv(p.price / D).length)) * 6 + 14)} tickFormatter={(v: number) => fv(v)} domain={[(min: number) => { const max = Math.max(...series.map((p) => p.price / D)); const pad = Math.max((max - min) * 0.5, min * 0.01); return Math.max(0, +(min - pad).toFixed(dp + 2)); }, (max: number) => { const min = Math.min(...series.map((p) => p.price / D)); const pad = Math.max((max - min) * 0.1, max * 0.005); return +(max + pad).toFixed(dp + 2); }]} />
           <Tooltip formatter={(v: number) => [`${U} ${fv(v)}`, "Avg Price"]} />
           <defs>
             {series.map((p, i) => <linearGradient key={p.month} id={`zr-g-${i}`} x1="0" y1="0" x2="0" y2="1">
