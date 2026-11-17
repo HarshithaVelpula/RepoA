@@ -16,7 +16,7 @@ async function lookups() {
 
 /** Database-summed rows (month × ValCl × Profit Centre × Plant, no material): small and fast for tiles/cards. */
 export const monthWiseStockQuery = {
-  queryKey: ["month-wise-stock", "v4-summary"] as const,
+  queryKey: ["month-wise-stock", "v5-summary"] as const,
   queryFn: async (): Promise<StockRow[]> => {
     const [res, lk] = await Promise.all([supabase.rpc("month_wise_stock_summary" as never), lookups()]);
     if (res.error) throw res.error;
@@ -49,7 +49,7 @@ export const monthWiseStockMonthQuery = (period: string) => ({
 
 /** Material-level totals: top 40 materials per month plus every ZKEYRM material (Top Materials + ZKEYRM cards). */
 export const monthWiseStockMaterialsQuery = {
-  queryKey: ["month-wise-stock", "v4-materials"] as const,
+  queryKey: ["month-wise-stock", "v5-materials"] as const,
   queryFn: async (): Promise<StockRow[]> => {
     const ms = await mastersQuery("zrmmat").queryFn();
     const zr = (await Promise.all(ms.map((m) => getMasterRows(m.id)))).flat();
@@ -64,7 +64,7 @@ export const monthWiseStockMaterialsQuery = {
 export type StockKpi = { period: string; type: string; value: number };
 /** Launchpad: month × valuation class totals only (a few dozen rows). */
 export const monthWiseStockKpisQuery = {
-  queryKey: ["month-wise-stock", "v4-kpis"] as const,
+  queryKey: ["month-wise-stock", "v5-kpis"] as const,
   queryFn: async (): Promise<StockKpi[]> => {
     const [res, val] = await Promise.all([supabase.rpc("month_wise_stock_kpis" as never), masterRows("valuation_subgroup")]);
     if (res.error) throw res.error;

@@ -112,30 +112,48 @@ export type Database = {
       }
       month_wise_upload: {
         Row: {
+          cb_qty: number | null
+          cb_val: number | null
           created_at: string
           created_by: string | null
           data: Json
           id: string
+          material: string | null
           month: number
+          plant: string | null
+          profit_centre: string | null
           updated_at: string
+          val_class: string | null
           year: number
         }
         Insert: {
+          cb_qty?: number | null
+          cb_val?: number | null
           created_at?: string
           created_by?: string | null
           data?: Json
           id?: string
+          material?: string | null
           month: number
+          plant?: string | null
+          profit_centre?: string | null
           updated_at?: string
+          val_class?: string | null
           year: number
         }
         Update: {
+          cb_qty?: number | null
+          cb_val?: number | null
           created_at?: string
           created_by?: string | null
           data?: Json
           id?: string
+          material?: string | null
           month?: number
+          plant?: string | null
+          profit_centre?: string | null
           updated_at?: string
+          val_class?: string | null
           year?: number
         }
         Relationships: []
@@ -4333,6 +4351,7 @@ export type Database = {
         }
         Returns: Json
       }
+      mws_access: { Args: never; Returns: Record<string, unknown> }
       mws_num: { Args: { _v: string }; Returns: number }
       mwu_can_manage: { Args: never; Returns: boolean }
       net_sales_summary:
