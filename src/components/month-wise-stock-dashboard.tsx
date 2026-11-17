@@ -12,7 +12,7 @@ import { summarizeGroupsByDivision } from "@/lib/open-orders-groups";
 import { FilterMultiSelect } from "@/components/filter-multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useQuery } from "@tanstack/react-query";
-import { monthWiseStockMonthQuery } from "@/lib/month-wise-stock-data";
+import { monthWiseStockMonthQuery, monthWiseStockMaterialsQuery } from "@/lib/month-wise-stock-data";
 import { sumBy, defaultPeriod, nowPeriodIST, latestPeriod, lastNMonthsByType, topWithOthers, toPurchaseRows, type StockRow } from "@/lib/month-wise-stock-map";
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -44,7 +44,10 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const tw = topWithOthers(types, 10);
   const monthly = useMemo(() => { const m = new Map<string, number>(); for (const r of filtered) m.set(r.period, (m.get(r.period) ?? 0) + r.value); return [...m.entries()].sort().map(([k, v]) => ({ name: pl(k), value: v })); }, [filtered]);
   const cmp = useMemo(() => lastNMonthsByType(rows.filter((r) => (!f.plants || f.plants.includes(plantName(r))) && (!f.types || f.types.includes(r.type))), periods), [rows, f, periods]);
-  const zk = useMemo(() => toPurchaseRows(filtered), [filtered]);
+  const mq = useQuery(monthWiseStockMaterialsQuery);
+  const matsF = useMemo(() => (mq.data ?? []).filter((r) => (!f.plants || f.plants.includes(plantName(r))) && (!f.types || f.types.includes(r.type)) && (!months || months.includes(r.period))), [mq.data, f, months]);
+  const matsCur = useMemo(() => matsF.filter((r) => r.period === lp), [matsF, lp]);
+  const zk = useMemo(() => toPurchaseRows(matsF), [matsF]);
   const MS = "col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0";
   const field = (k: "plants" | "types", o: string[], label: string) => <div className={MS}><FilterMultiSelect label={label} selected={f[k]} options={o} onChange={(v) => setF({ ...f, [k]: v.length === o.length ? null : v })} placeholder="All" /></div>;
   const sub = lp ? pl(lp) : "No months";
@@ -52,7 +55,6 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
     const g = summarizeGroupsByDivision(cur.filter((r) => k(r)).map((r) => ({ name: k(r), value: r.value / 1e7, order: r.key, division: r.plant })), (r) => r.name);
     return <Card tint={tint} title={title} sub={`${sub} · ₹ Cr`}>{g.groups.length ? <OrderBookSubGroupChart groups={g.groups} divisions={g.divisions} groupLabel={title} /> : <p className="py-8 text-center text-xs text-muted-foreground">No data</p>}</Card>;
   };
-  const groupCard = (title: string, k: (r: StockRow) => string, tint: Tint) => <Card tint={tint} title={title} sub={`${sub} · ₹ Cr`}><BarList data={sumBy(cur, k).slice(0, 10)} fmt={crv} /></Card>;
 
   return <div className="space-y-3">
     <div data-pdf-exclude className="rounded-xl border border-border shadow-sm" style={TINTS.neutral}>
@@ -93,7 +95,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
         <Tooltip formatter={(v: number) => crv(v)} />
         <Bar dataKey="value" name="CB Val" radius={[6, 6, 0, 0]} maxBarSize={44}>{sumBy(cur, (r) => r.sub3 || r.plant).slice(0, 15).map((_, i) => <Cell key={i} fill={`url(#mws-p${i})`} />)}<LabelList dataKey="value" position="top" formatter={(v: number) => crv(v)} style={{ fontSize: 9, fontWeight: 700, fill: "var(--foreground)" }} /></Bar>
       </ComposedChart></ResponsiveContainer></div></Card></div>
-      <div className="lg:col-span-4">{groupCard("Top 10 Materials", (r) => r.materialName || r.material, "violet")}</div>
+      <div className="lg:col-span-4"><Card tint="violet" title="Top 10 Materials" sub={`${sub} · ₹ Cr`}>{mq.isLoading ? <p className="py-8 text-center text-xs text-muted-foreground">Loading materials…</p> : <BarList data={sumBy(matsCur, (r) => r.materialName || r.material).slice(0, 10)} fmt={crv} />}</Card></div>
     </div>
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       {gCard("Main Group", (r) => r.mainGroup, "sky")}

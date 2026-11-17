@@ -4319,6 +4319,9 @@ export type Database = {
       is_data_admin: { Args: { _user_id: string }; Returns: boolean }
       is_super_admin: { Args: { _user_id: string }; Returns: boolean }
       list_sap_credential_keys: { Args: never; Returns: string[] }
+      month_wise_stock_kpis: { Args: never; Returns: Json }
+      month_wise_stock_materials: { Args: { _mats?: string[] }; Returns: Json }
+      month_wise_stock_summary: { Args: never; Returns: Json }
       month_wise_stock_totals: { Args: never; Returns: Json }
       month_wise_upload_page: {
         Args: {
@@ -4330,6 +4333,7 @@ export type Database = {
         }
         Returns: Json
       }
+      mws_num: { Args: { _v: string }; Returns: number }
       mwu_can_manage: { Args: never; Returns: boolean }
       net_sales_summary:
         | {

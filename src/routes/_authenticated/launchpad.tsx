@@ -1,4 +1,4 @@
-import { monthWiseStockQuery } from "@/lib/month-wise-stock-data";
+import { monthWiseStockKpisQuery } from "@/lib/month-wise-stock-data";
 import { defaultPeriod, nowPeriodIST } from "@/lib/month-wise-stock-map";
 import type * as React from "react";
 import { useMemo, useState } from "react";
@@ -106,7 +106,7 @@ function Launchpad() {
   </div>;
 }
 function MonthWiseStockTile({ href }: { href: string }) {
-  const q = useQuery(monthWiseStockQuery);
+  const q = useQuery(monthWiseStockKpisQuery);
   const all = q.data ?? [];
   const ps = [...new Set(all.map((r) => r.period))];
   const latest = defaultPeriod(ps, nowPeriodIST()) || ps.sort().at(-1) || "";

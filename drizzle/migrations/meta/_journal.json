@@ -323,6 +323,13 @@
       "when": 1794910102037,
       "tag": "0045_month_wise_stock_totals",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1794916115711,
+      "tag": "0046_month_wise_stock_fast_summaries",
+      "breakpoints": true
     }
   ]
 }
