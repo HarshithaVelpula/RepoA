@@ -38,7 +38,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const cur = filtered;
   const total = cur.reduce((s, r) => s + r.value, 0);
   const types = sumBy(cur, (r) => r.type);
-  const tw = topWithOthers(types, 10);
+  const tw = topWithOthers(types, 5);
   const monthly = useMemo(() => { const m = new Map<string, number>(); for (const r of filtered) m.set(r.period, (m.get(r.period) ?? 0) + r.value); return [...m.entries()].sort().map(([k, v]) => ({ name: pl(k), value: v })); }, [filtered]);
   const zk = useMemo(() => toPurchaseRows(filtered), [filtered]);
   const MS = "col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0";
@@ -60,8 +60,8 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
     </div>
 
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-      <Tile icon={<IndianRupee className="size-5" />} label="Total Inv Val" value={crv(total)} tone="#1f6fd1" />
-      {types.filter((t) => t.value !== 0).map((t, i) => <Tile key={t.name} icon={<IndianRupee className="size-5" />} label={`${t.name} Val`} value={crv(t.value)} tone={TONES[i % TONES.length] ?? "#64748b"} />)}
+      <Tile icon={<IndianRupee className="size-5" />} label="Total Inv" value={crv(total)} tone="#1f6fd1" />
+      {types.filter((t) => t.value !== 0).map((t, i) => <Tile key={t.name} icon={<IndianRupee className="size-5" />} label={t.name} value={crv(t.value)} tone={TONES[i % TONES.length] ?? "#64748b"} />)}
     </div>
 
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">

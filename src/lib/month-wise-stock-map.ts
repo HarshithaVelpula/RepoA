@@ -39,7 +39,7 @@ export function mapStockRows(raw: { id: string; month: number; year: number; dat
       profitCenter: pc, valClass: vc, type: val.get(strip0(vc)) || vc || "Unassigned", matGroup: t(pick(d, "Matl Group")), unit: t(pick(d, "BUn")),
       qty: num(pick(d, "CB Qty")), value: num(pick(d, "CB Val")), mainGroup: g[0], sub1: g[1], sub2: g[2], sub3: g[3], data: d,
     };
-  });
+  }).filter((r) => r.valClass || r.material); // skip Excel total/blank rows
 }
 
 /** Pure: sum value by a key, descending, empty keys ignored. */

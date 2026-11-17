@@ -8,7 +8,7 @@ async function masterRows(cat: "zpc_group" | "valuation_subgroup") {
 }
 
 export const monthWiseStockQuery = {
-  queryKey: ["month-wise-stock", "v1"] as const,
+  queryKey: ["month-wise-stock", "v2-no-total-row"] as const,
   queryFn: async (): Promise<StockRow[]> => {
     const raw: { id: string; month: number; year: number; data: Record<string, string> }[] = [];
     let last: string | null = null;

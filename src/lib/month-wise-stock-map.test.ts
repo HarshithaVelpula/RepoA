@@ -25,3 +25,13 @@ describe("topWithOthers", () => {
     expect(r.others.map((o) => o.name)).toEqual(["T1", "T0"]);
   });
 });
+
+import { mapStockRows as _map } from "./month-wise-stock-map";
+import { it as _it, expect as _ex } from "vitest";
+_it("skips Excel total row without ValCl and material", () => {
+  const rows = _map([
+    { id: "1", month: 10, year: 2026, data: { ValCl: "4011", Material: "M1", "CB Val": "100" } },
+    { id: "2", month: 10, year: 2026, data: { "CB Val": "100" } },
+  ], new Map(), new Map());
+  _ex(rows.map((r) => r.key)).toEqual(["1"]);
+});
