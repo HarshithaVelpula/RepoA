@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { askConfirm } from "@/components/confirm-dialog";
 import { UploadExcelButton } from "@/components/upload-excel-button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -56,7 +57,7 @@ function View({ isAdmin, cat: CAT, title, single }: { isAdmin: boolean; cat: Mas
       if (!s.length) { toast.error("No sheets with a header row found"); return; }
       if (single) {
         const sheet = { ...s[0]!, name: current?.name ?? s[0]!.name };
-        if (current && !confirm(`This will replace the current ${title} data (${current.row_count} rows) with ${sheet.rows.length} rows from the file. Continue?`)) return;
+        if (current && !(await askConfirm(`This will replace the current ${title} data (${current.row_count} rows) with ${sheet.rows.length} rows from the file. Continue?`))) return;
         try {
           setBusy("Starting…");
           const n = await uploadSheet(sheet, ROW_KEY, (d, t) => setBusy(`${d} / ${t} rows`), CAT);
@@ -73,7 +74,7 @@ function View({ isAdmin, cat: CAT, title, single }: { isAdmin: boolean; cat: Mas
   const save = async () => {
     if (!sheets) return;
     const lost = sheets.filter((s) => countUniqueKeys(s.rows, keys[s.name]!) < s.rows.length);
-    if (lost.length && !confirm(lost.map((s) => `${s.name}: ${s.rows.length} rows in file → only ${countUniqueKeys(s.rows, keys[s.name]!)} unique keys`).join("\n") + "\n\nRows with the same key will be merged. Continue?")) return;
+    if (lost.length && !(await askConfirm(lost.map((s) => `${s.name}: ${s.rows.length} rows in file → only ${countUniqueKeys(s.rows, keys[s.name]!)} unique keys`).join("\n") + "\n\nRows with the same key will be merged. Continue?"))) return;
     try {
       for (const s of sheets) {
         setBusy(`${s.name}: starting…`);
@@ -94,7 +95,7 @@ function View({ isAdmin, cat: CAT, title, single }: { isAdmin: boolean; cat: Mas
       setEdit(null);
     }, edit.id ? "Row updated" : "Row added");
   };
-  const delRows = (ids: string[]) => { if (current && ids.length && confirm(`Delete ${ids.length} row(s)?`)) void run(() => deleteMasterRows(current.id, ids), `${ids.length} row(s) deleted`); };
+  const delRows = async (ids: string[]) => { if (current && ids.length && await askConfirm(`Delete ${ids.length} row(s)?`)) void run(() => deleteMasterRows(current.id, ids), `${ids.length} row(s) deleted`); };
 
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-3 rounded-lg border tm-panel p-4 md:flex-nowrap">
@@ -111,7 +112,7 @@ function View({ isAdmin, cat: CAT, title, single }: { isAdmin: boolean; cat: Mas
         {current && <Button className="btn-success md:px-3" onClick={() => downloadMasterExcel(current.name, cols, filtered.map((r) => r.data), title)}><Download className="mr-1 h-4 w-4" />Excel</Button>}
         {isAdmin && <>
           {current && <Button variant="outline" onClick={() => setEdit({ id: null, data: Object.fromEntries(cols.map((c) => [c, ""])) })}><Plus className="mr-1 h-4 w-4" />Add row</Button>}
-          {current && <Button className="btn-danger md:px-3" onClick={() => { if (confirm(single ? `Delete all ${title} data?` : `Delete sheet "${current.name}" and all its rows?`)) void run(() => deleteMaster(current.id), "Sheet deleted").then(() => setSelId("")); }}><Trash2 className="mr-1 h-4 w-4" />{single ? "Delete" : "Delete sheet"}</Button>}
+          {current && <Button className="btn-danger md:px-3" onClick={async () => { if (await askConfirm(single ? `Delete all ${title} data?` : `Delete sheet "${current.name}" and all its rows?`)) void run(() => deleteMaster(current.id), "Sheet deleted").then(() => setSelId("")); }}><Trash2 className="mr-1 h-4 w-4" />{single ? "Delete" : "Delete sheet"}</Button>}
           <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ""; }} />
           <UploadExcelButton busy={single ? busy : null} onClick={() => fileRef.current?.click()} />
         </>}

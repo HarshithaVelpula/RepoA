@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { askConfirm } from "@/components/confirm-dialog";
 import { UploadExcelButton } from "@/components/upload-excel-button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -55,7 +56,7 @@ function View({ canEdit }: { canEdit: boolean }) {
       const sheets = await parseWorkbook(f);
       const data = nonEmptyRows(sheets[0]?.rows ?? []);
       if (!data.length) { toast.error("No rows found in this Excel file"); return; }
-      if (totalRows && !confirm(`${label} already has ${totalRows} rows. Replace them with ${data.length} rows from this file?`)) return;
+      if (totalRows && !(await askConfirm(`${label} already has ${totalRows} rows. Replace them with ${data.length} rows from this file?`))) return;
       setBusy("Uploading…");
       await replaceMonth(month, year, data, created, (d, t) => setBusy(`Uploading ${d} / ${t}`));
       toast.success(`${data.length} rows saved for ${label}`);
@@ -84,7 +85,7 @@ function View({ canEdit }: { canEdit: boolean }) {
       <div className="flex w-full flex-wrap justify-end gap-2 md:ml-auto md:w-auto md:shrink-0 md:flex-nowrap">
         {totalRows > 0 && <Button className="btn-success md:px-3" disabled={!!busy} onClick={() => void exportExcel()}><Download className="mr-1 h-4 w-4" />Excel</Button>}
         {canEdit && <>
-          {totalRows > 0 && <Button className="btn-danger md:px-3" onClick={() => { if (confirm(`Delete all ${totalRows} rows for ${label}?`)) void run(() => deleteMonth(month, year), "Month deleted"); }}><Trash2 className="mr-1 h-4 w-4" />Delete<span className="hidden xl:inline">&nbsp;month</span></Button>}
+          {totalRows > 0 && <Button className="btn-danger md:px-3" onClick={async () => { if (await askConfirm(`Delete all ${totalRows} rows for ${label}?`)) void run(() => deleteMonth(month, year), "Month deleted"); }}><Trash2 className="mr-1 h-4 w-4" />Delete<span className="hidden xl:inline">&nbsp;month</span></Button>}
           <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ""; }} />
           <UploadExcelButton busy={busy} onClick={() => fileRef.current?.click()} />
         </>}
@@ -110,7 +111,7 @@ function View({ canEdit }: { canEdit: boolean }) {
             <td className="whitespace-nowrap px-2.5 py-1">{fmtIst(r.updated_at)}</td>
             {canEdit && <td className="whitespace-nowrap px-2.5 py-1 text-right">
               <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Edit row" onClick={() => setEdit({ id: r.id, data: { ...Object.fromEntries(cols.map((c) => [c, ""])), ...r.data } })}><Pencil className="h-3.5 w-3.5" /></Button>
-              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/15" aria-label="Delete row" onClick={() => { if (confirm("Delete this row?")) void run(() => deleteRows([r.id], month, year), "Row deleted"); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/15" aria-label="Delete row" onClick={async () => { if (await askConfirm("Delete this row?")) void run(() => deleteRows([r.id], month, year), "Row deleted"); }}><Trash2 className="h-3.5 w-3.5" /></Button>
             </td>}
           </tr>)}
           {!view.length && <tr><td className="px-3 py-6 text-center text-muted-foreground" colSpan={allCols.length + 1}>{q.isLoading ? "Loading…" : `No data for ${label}. Upload an Excel file.`}</td></tr>}
