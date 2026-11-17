@@ -1,19 +1,20 @@
 # Fast Month Wise Stock screen and launchpad
 
 ## Why it is slow
-Both the screen and the launchpad card download every uploaded row for every month (60,000+ per month), 1,000 rows at a time, one request after another. Production has more months stored, so it takes much longer.
+Both the screen and the launchpad card download every uploaded row for every month (60,000+ per month) in 1,000-row batches, one after another. Production stores more months, so it is much slower there.
 
-## Fix
-1. Database summary function `month_wise_stock_summary(months)`: totals grouped in the database by month, valuation class, profit centre, plant, material. It returns a few thousand summary lines instead of lakhs of raw rows. It respects the same access rules.
-2. Launchpad card: calls a tiny function `month_wise_stock_latest_total()` that returns only the latest month total and its top types. It loads in under a second.
-3. Screen: loads the summary first, so tiles, cards and charts show quickly. The detailed table loads page by page from the database (50 rows per page, with search). Excel downloads the full rows only when clicked.
-4. Index on (year, month) already exists. Add an index on the valuation class and profit centre values inside the data.
-5. Mirror the migration in supabase/migrations so you can run it on Quality and Production.
+## Fix (filter by the Month and Year columns)
+1. **Launchpad card:** reads only the latest uploaded month, already totalled in the database. It shows the ₹ Cr total and the top types almost instantly.
+2. **Screen opens fast:** the tiles, Top 10 Types, Top 15 Plants, Top 10 Materials, Main/Sub Group cards and the table load only the latest selected month. This is a single month's data, filtered by Month and Year.
+3. **Month Wise Inventory and Last 3 Months Comparison:** these load separately, after the rest of the screen is showing, using small month-by-type totals from the database. Each card shows its own loading spinner, so the rest of the screen never waits for them.
+4. **ZKEYRM Comparison:** uses the same month totals per material, not the raw rows.
+5. **Detailed table:** pages of 50 rows from the database, with search. Excel downloads the full month only when you click it.
 
 ## Unchanged
-Numbers, filters (Month, Plant, Type), the total-row exclusion, ZKEYRM Comparison, Last 3 Months Comparison and the PDF stay the same. Data still refreshes only when you click Refresh.
+The numbers, the Month/Plant/Type filters, the Excel total-row exclusion and the PDF stay the same. Data still refreshes only when you click Refresh.
 
 ## Technical
-- RPC returns rows aggregated by (year, month, ValCl, Profit Centre, Plant, Material) with sum(CB Qty) and sum(CB Val), excluding rows with empty ValCl (the total row).
-- mapStockRows works on aggregated rows; existing tests are kept.
-- The table uses a paged RPC similar to month_wise_upload_page.
+- New RPCs (security invoker, same RLS): `month_wise_stock_months()` (the list of month/year values), `month_wise_stock_rows(_month,_year)` (one month's rows, skipping empty ValCl), and `month_wise_stock_totals()` (sum CB Val/CB Qty grouped by year, month, ValCl, Profit Centre, Material).
+- Index on (year, month) is already present.
+- Query keys per month: ["month-wise-stock","month",y,m] and ["month-wise-stock","totals"]. The launchpad uses the latest-month query.
+- Mirror the migration in supabase/migrations for Quality and Production.
