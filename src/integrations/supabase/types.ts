@@ -110,6 +110,171 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_production: {
+        Row: {
+          age: number | null
+          ah: number | null
+          arbpl: string | null
+          aufnr: string | null
+          avg_count: number | null
+          beams: number | null
+          budat: string | null
+          bwart: string | null
+          cell_type: string | null
+          charg: string | null
+          comb: string | null
+          cont_ref: string | null
+          dmbtr: number | null
+          gltrp: string | null
+          gstrp: string | null
+          id: string
+          kdauf: string | null
+          kdpos: string | null
+          ktext_up: string | null
+          lgort: string | null
+          maktx: string | null
+          matnr: string | null
+          mblnr: string
+          meins: string | null
+          menge: number | null
+          mjahr: string
+          model: string | null
+          name1: string | null
+          neg_plates: number | null
+          pos_plates: number | null
+          range_txt: string | null
+          rate: number | null
+          raw: Json
+          scrap_qty: number | null
+          scrap_value: number | null
+          source_endpoint: string | null
+          stack_cell: number | null
+          stage: string | null
+          stlbez: string | null
+          synced_at: string
+          tmtrs: number | null
+          totah: number | null
+          type_txt: string | null
+          uname: string | null
+          usnam: string | null
+          waers: string | null
+          werks: string | null
+          width: number | null
+          zeile: string
+          zkostl: string | null
+          zkostl_name: string | null
+          zstage: string | null
+        }
+        Insert: {
+          age?: number | null
+          ah?: number | null
+          arbpl?: string | null
+          aufnr?: string | null
+          avg_count?: number | null
+          beams?: number | null
+          budat?: string | null
+          bwart?: string | null
+          cell_type?: string | null
+          charg?: string | null
+          comb?: string | null
+          cont_ref?: string | null
+          dmbtr?: number | null
+          gltrp?: string | null
+          gstrp?: string | null
+          id?: string
+          kdauf?: string | null
+          kdpos?: string | null
+          ktext_up?: string | null
+          lgort?: string | null
+          maktx?: string | null
+          matnr?: string | null
+          mblnr: string
+          meins?: string | null
+          menge?: number | null
+          mjahr?: string
+          model?: string | null
+          name1?: string | null
+          neg_plates?: number | null
+          pos_plates?: number | null
+          range_txt?: string | null
+          rate?: number | null
+          raw?: Json
+          scrap_qty?: number | null
+          scrap_value?: number | null
+          source_endpoint?: string | null
+          stack_cell?: number | null
+          stage?: string | null
+          stlbez?: string | null
+          synced_at?: string
+          tmtrs?: number | null
+          totah?: number | null
+          type_txt?: string | null
+          uname?: string | null
+          usnam?: string | null
+          waers?: string | null
+          werks?: string | null
+          width?: number | null
+          zeile?: string
+          zkostl?: string | null
+          zkostl_name?: string | null
+          zstage?: string | null
+        }
+        Update: {
+          age?: number | null
+          ah?: number | null
+          arbpl?: string | null
+          aufnr?: string | null
+          avg_count?: number | null
+          beams?: number | null
+          budat?: string | null
+          bwart?: string | null
+          cell_type?: string | null
+          charg?: string | null
+          comb?: string | null
+          cont_ref?: string | null
+          dmbtr?: number | null
+          gltrp?: string | null
+          gstrp?: string | null
+          id?: string
+          kdauf?: string | null
+          kdpos?: string | null
+          ktext_up?: string | null
+          lgort?: string | null
+          maktx?: string | null
+          matnr?: string | null
+          mblnr?: string
+          meins?: string | null
+          menge?: number | null
+          mjahr?: string
+          model?: string | null
+          name1?: string | null
+          neg_plates?: number | null
+          pos_plates?: number | null
+          range_txt?: string | null
+          rate?: number | null
+          raw?: Json
+          scrap_qty?: number | null
+          scrap_value?: number | null
+          source_endpoint?: string | null
+          stack_cell?: number | null
+          stage?: string | null
+          stlbez?: string | null
+          synced_at?: string
+          tmtrs?: number | null
+          totah?: number | null
+          type_txt?: string | null
+          uname?: string | null
+          usnam?: string | null
+          waers?: string | null
+          werks?: string | null
+          width?: number | null
+          zeile?: string
+          zkostl?: string | null
+          zkostl_name?: string | null
+          zstage?: string | null
+        }
+        Relationships: []
+      }
       month_wise_upload: {
         Row: {
           cb_qty: number | null
