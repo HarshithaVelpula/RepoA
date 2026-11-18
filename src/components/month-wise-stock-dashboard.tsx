@@ -22,7 +22,6 @@ const pl = (p: string) => `${MON[Number(p.slice(5, 7)) - 1]}-${p.slice(0, 4)}`;
 const TONES = ["#0f9d8a", "#e08a1e", "#8e44ad", "#d64550", "#3a8dde", "#16a3b8", "#c0841a", "#5c6bc0", "#2e8b57", "#64748b"];
 type F = { plants: string[] | null; types: string[] | null };
 const EMPTY: F = { plants: null, types: null };
-const plantName = (r: StockRow) => r.sub3 || r.plant;
 
 export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const [f, setF] = useState<F>(EMPTY);
@@ -33,8 +32,8 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const [monthSel, setMonthSel] = useState<string[] | null | undefined>(undefined);
   const months = monthSel === undefined ? defaultMonths : monthSel;
   const opt = (k: (r: StockRow) => string) => [...new Set(rows.map(k).filter(Boolean))].sort();
-  const opts = useMemo(() => ({ plant: opt(plantName), type: opt((r) => r.type) }), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
-  const filtered = useMemo(() => rows.filter((r) => (!f.plants || f.plants.includes(plantName(r))) && (!f.types || f.types.includes(r.type))
+  const opts = useMemo(() => { const m = new Map<string, string>(); for (const r of rows) if (r.plant && !m.has(r.plant)) m.set(r.plant, r.sub3 && r.sub3 !== r.plant ? `${r.plant} - ${r.sub3}` : r.plant); return { plant: [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([value, label]) => ({ value, label })), type: opt((r) => r.type) }; }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filtered = useMemo(() => rows.filter((r) => (!f.plants || f.plants.includes(r.plant)) && (!f.types || f.types.includes(r.type))
     && (!months || months.includes(r.period))), [rows, f, months]);
   // Month Wise Inventory uses every selected month; all other tiles/cards use the latest selected month.
   const lp = latestPeriod(months ?? periods);
@@ -43,13 +42,13 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
   const types = sumBy(cur, (r) => r.type);
   const tw = topWithOthers(types, 10);
   const monthly = useMemo(() => { const m = new Map<string, number>(); for (const r of filtered) m.set(r.period, (m.get(r.period) ?? 0) + r.value); return [...m.entries()].sort().map(([k, v]) => ({ name: pl(k), value: v })); }, [filtered]);
-  const cmp = useMemo(() => lastNMonthsByType(rows.filter((r) => (!f.plants || f.plants.includes(plantName(r))) && (!f.types || f.types.includes(r.type))), periods), [rows, f, periods]);
+  const cmp = useMemo(() => lastNMonthsByType(rows.filter((r) => (!f.plants || f.plants.includes(r.plant)) && (!f.types || f.types.includes(r.type))), periods), [rows, f, periods]);
   const mq = useQuery(monthWiseStockMaterialsQuery);
-  const matsF = useMemo(() => (mq.data ?? []).filter((r) => (!f.plants || f.plants.includes(plantName(r))) && (!f.types || f.types.includes(r.type)) && (!months || months.includes(r.period))), [mq.data, f, months]);
+  const matsF = useMemo(() => (mq.data ?? []).filter((r) => (!f.plants || f.plants.includes(r.plant)) && (!f.types || f.types.includes(r.type)) && (!months || months.includes(r.period))), [mq.data, f, months]);
   const matsCur = useMemo(() => matsF.filter((r) => r.period === lp), [matsF, lp]);
   const zk = useMemo(() => toPurchaseRows(matsF), [matsF]);
   const MS = "col-span-2 sm:col-span-1 [&_label>span]:h-auto [&_label>span]:text-[10px] [&_label>span]:font-semibold [&_label]:space-y-0";
-  const field = (k: "plants" | "types", o: string[], label: string) => <div className={MS}><FilterMultiSelect label={label} selected={f[k]} options={o} onChange={(v) => setF({ ...f, [k]: v.length === o.length ? null : v })} placeholder="All" /></div>;
+  const field = (k: "plants" | "types", o: (string | { value: string; label: string })[], label: string) => <div className={MS}><FilterMultiSelect label={label} selected={f[k]} options={o as never} onChange={(v) => setF({ ...f, [k]: v.length === o.length ? null : v })} placeholder="All" /></div>;
   const sub = lp ? pl(lp) : "No months";
   const gCard = (title: string, k: (r: StockRow) => string, tint: Tint) => {
     const g = summarizeGroupsByDivision(cur.filter((r) => k(r)).map((r) => ({ name: k(r), value: r.value / 1e7, order: r.key, division: r.plant })), (r) => r.name);
@@ -112,7 +111,7 @@ export function MonthWiseStockDashboard({ rows }: { rows: StockRow[] }) {
 
 function MonthDetails({ period, plants, types }: { period: string; plants: string[] | null; types: string[] | null }) {
   const q = useQuery(monthWiseStockMonthQuery(period));
-  const rows = useMemo(() => (q.data ?? []).filter((r) => (!plants || plants.includes(plantName(r))) && (!types || types.includes(r.type))), [q.data, plants, types]);
+  const rows = useMemo(() => (q.data ?? []).filter((r) => (!plants || plants.includes(r.plant)) && (!types || types.includes(r.type))), [q.data, plants, types]);
   if (q.isError) return <p className="p-3 text-xs text-destructive">{(q.error as Error).message}</p>;
   if (q.isLoading) return <section className="rounded-xl border border-border p-6 text-center text-xs text-muted-foreground shadow-sm" style={TINTS.neutral}>Loading stock details…</section>;
   return <DetailsTable rows={rows} />;
