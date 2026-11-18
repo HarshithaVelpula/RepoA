@@ -274,6 +274,26 @@ export function withOpenPoDates(raw: string | null | undefined, range?: string |
   } catch { return raw; }
 }
 
+/** ZDPR: FROMDT/TODT (YYYY-MM-DD) follow the date-window preset; custom keeps saved dates (empty → last 7 days). */
+export function withDprDates(raw: string | null | undefined, range?: string | null, now: Date = new Date()): string | undefined {
+  if (!raw || !raw.trim()) return raw ?? undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+    const obj = { ...(parsed as Record<string, unknown>) };
+    const iso = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+    const valid = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? "").trim());
+    const window = postingWindow(range, now);
+    if (window) { obj["FROMDT"] = iso(window.from); obj["TODT"] = iso(window.to); }
+    else {
+      const from = new Date(now); from.setDate(from.getDate() - 7);
+      if (!valid(obj["FROMDT"])) obj["FROMDT"] = iso(sapDateOf(from));
+      if (!valid(obj["TODT"])) obj["TODT"] = iso(sapDateOf(now));
+    }
+    return JSON.stringify(obj);
+  } catch { return raw; }
+}
+
 export function withEndpointDates(
   endpointName: string,
   raw: string | null | undefined,
@@ -292,6 +312,7 @@ export function withEndpointDates(
   if (/^zcashflown?$/.test(endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase())) return raw ?? undefined;
   // User Management dropdowns: no date injection, payload sent as saved.
   if (endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase().includes("usermanagementdropdown")) return raw ?? undefined;
+  if (/dailyproduction|^zdpr$/.test(endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase())) return withDprDates(raw, range, now);
   if (endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase().includes("orderbook")) return withOrderBookDates(raw, range, now);
   return isOpenSalesOrdersEndpoint(endpointName)
     ? withOpenSalesOrdersDate(raw, now, scheduled)

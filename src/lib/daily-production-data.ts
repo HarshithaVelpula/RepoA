@@ -1,0 +1,58 @@
+import { queryOptions } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+
+export type DprRow = {
+  plant: string; stage: string; mvt: string; material: string; matDesc: string; sloc: string; batch: string; qty: number; uom: string;
+  order: string; date: string; value: number; rate: number; wc: string; wcDesc: string; cc: string; ccName: string;
+  doc: string; scrapQty: number; scrapVal: number; user: string;
+};
+
+const t = (v: unknown) => (v == null ? "" : String(v)).trim();
+const n = (v: unknown) => Number(v) || 0;
+type Rec = Record<string, unknown>;
+export function toDprRow(r: Rec): DprRow {
+  return {
+    plant: t(r["werks"]), stage: t(r["zstage"]), mvt: t(r["bwart"]), material: t(r["matnr"]), matDesc: t(r["maktx"]) || t(r["matnr"]),
+    sloc: t(r["lgort"]), batch: t(r["charg"]), qty: n(r["menge"]), uom: t(r["meins"]), order: t(r["aufnr"]), date: t(r["budat"]),
+    value: n(r["dmbtr"]), rate: n(r["rate"]), wc: t(r["arbpl"]), wcDesc: t(r["ktext_up"]) || t(r["arbpl"]), cc: t(r["zkostl"]),
+    ccName: t(r["zkostl_name"]) || t(r["zkostl"]), doc: t(r["mblnr"]), scrapQty: n(r["scrap_qty"]), scrapVal: n(r["scrap_value"]), user: t(r["uname"]) || t(r["usnam"]),
+  };
+}
+
+/** Totals for tiles; scrap % = scrap qty ÷ (good + scrap qty). */
+export function dprTotals(rows: DprRow[]) {
+  let qty = 0, value = 0, scrapQty = 0, scrapVal = 0;
+  for (const r of rows) { qty += r.qty; value += r.value; scrapQty += r.scrapQty; scrapVal += r.scrapVal; }
+  return { qty, value, scrapQty, scrapVal, scrapPct: qty + scrapQty ? (scrapQty / (qty + scrapQty)) * 100 : 0, orders: new Set(rows.map((r) => r.order).filter(Boolean)).size };
+}
+export function dprGroup(rows: DprRow[], key: (r: DprRow) => string, val: (r: DprRow) => number = (r) => r.value) {
+  const m = new Map<string, number>();
+  for (const r of rows) { const k = key(r); if (!k) continue; m.set(k, (m.get(k) ?? 0) + val(r)); }
+  return [...m].map(([name, value]) => ({ name, value })).filter((d) => d.value > 0).sort((a, b) => b.value - a.value);
+}
+/** Day-wise production and scrap value, oldest first. */
+export function dprDaily(rows: DprRow[]) {
+  const m = new Map<string, { value: number; scrap: number }>();
+  for (const r of rows) { if (!r.date) continue; const c = m.get(r.date) ?? { value: 0, scrap: 0 }; c.value += r.value; c.scrap += r.scrapVal; m.set(r.date, c); }
+  return [...m].sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({ date, ...v }));
+}
+
+const COLS = "id,werks,zstage,bwart,matnr,maktx,lgort,charg,menge,meins,aufnr,budat,dmbtr,rate,arbpl,ktext_up,zkostl,zkostl_name,mblnr,scrap_qty,scrap_value,uname,usnam";
+const PAGE = 1000;
+export async function getDailyProduction(): Promise<DprRow[]> {
+  const out: Rec[] = [];
+  let after = "";
+  for (;;) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- table added after generated types
+    let q = (supabase as unknown as { from: (t: string) => any }).from("daily_production").select(COLS).order("id").limit(PAGE);
+    if (after) q = q.gt("id", after);
+    const { data, error } = await q;
+    if (error) throw new Error(`Unable to load Daily Production: ${error.message}`);
+    const list = (data ?? []) as unknown as Rec[];
+    out.push(...list);
+    if (list.length < PAGE) break;
+    after = String(list[list.length - 1]!["id"]);
+  }
+  return out.map(toDprRow);
+}
+export const dailyProductionQuery = queryOptions({ queryKey: ["daily-production", "v1"], queryFn: getDailyProduction, staleTime: Infinity, refetchOnWindowFocus: false });

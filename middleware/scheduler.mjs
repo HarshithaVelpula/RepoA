@@ -35,6 +35,8 @@ import {
   isOpenPoEndpoint,
   mapCurrentStockPayload,
   isCurrentStockEndpoint,
+  isDailyProductionEndpoint,
+  mapDailyProductionPayload,
   mapPurchaseOrdersPayload,
   isPurchaseOrdersEndpoint,
   keyValueObject,
@@ -209,6 +211,22 @@ export function createScheduler({ callSap, resolveSystem, logLine, newTraceId })
         removed = count ?? 0;
       }
       return { received, stored: rows.length, replaced: removed, skipped: 0, invalid, duplicates, syncScopeKey: "purchase_orders", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isDailyProductionEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapDailyProductionPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("daily_production").upsert(rows.slice(i, i + BATCH), { onConflict: "mblnr,mjahr,zeile" });
+        if (error) throw new Error(error.message);
+      }
+      let removed = 0;
+      const dates = rows.map((r) => r.budat).filter(Boolean).sort();
+      if (rows.length && dates.length) {
+        const { count, error } = await db.from("daily_production").delete({ count: "exact" })
+          .gte("budat", dates[0]).lte("budat", dates[dates.length - 1]).lt("synced_at", rows[0].synced_at);
+        if (error) throw new Error(error.message);
+        removed = count ?? 0;
+      }
+      return { received, stored: rows.length, replaced: removed, skipped: 0, invalid, duplicates, syncScopeKey: "daily_production", snapshotId: null, postingFrom: null, postingTo: null };
     }
     if (isCurrentStockEndpoint(endpoint)) {
       const { received, rows, invalid, duplicates } = mapCurrentStockPayload(payload, endpoint);

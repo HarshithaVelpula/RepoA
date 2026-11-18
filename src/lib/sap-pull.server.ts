@@ -13,6 +13,7 @@ import { isSalesRegisterEndpoint, mapSalesRegisterPayload } from "./sales-regist
 import { isOpenPoEndpoint, mapOpenPoPayload } from "./open-po-map";
 import { isCurrentStockEndpoint, mapCurrentStockPayload } from "./current-stock-map";
 import { isPurchaseOrdersEndpoint, mapPurchaseOrdersPayload } from "./purchase-orders-map";
+import { isDailyProductionEndpoint, mapDailyProductionPayload } from "./daily-production-map";
 import { isPurchaseRegisterEndpoint, mapPurchaseRegisterPayload } from "./purchase-register-map";
 import {
   extractEmbeddedBody,
@@ -480,6 +481,46 @@ export async function storeCurrentStockPayload(
   }
 }
 
+export async function storeDailyProductionPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapDailyProductionPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "daily_production", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("daily_production" as never).upsert(rows.slice(i, i + BATCH) as never, { onConflict: "mblnr,mjahr,zeile" });
+      if (error) throw error;
+    }
+    // Lines inside the returned posting-date span not refreshed by this run were reversed/removed in SAP.
+    let removed = 0;
+    const dates = rows.map((r) => r["budat"] as string | null).filter(Boolean).sort() as string[];
+    if (rows.length && dates.length) {
+      const { count, error } = await db.from("daily_production" as never).delete({ count: "exact" }).gte("budat", dates[0]!).lte("budat", dates[dates.length - 1]!).lt("synced_at", rows[0]!["synced_at"] as string);
+      if (error) throw error;
+      removed = count ?? 0;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated; ${removed} old lines removed; ${invalid} without MBLNR` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, replaced: removed, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Daily Production write failed" });
+    throw err;
+  }
+}
+
 export async function storeOpenPoPayload(
   payload: unknown,
   endpointName: string,
@@ -720,7 +761,7 @@ export async function pullSapEndpoint(
 
 
 
-  const counts = await (isCurrentStockEndpoint(endpointName) ? storeCurrentStockPayload : isOpenPoEndpoint(endpointName) ? storeOpenPoPayload : isPurchaseOrdersEndpoint(endpointName) ? storePurchaseOrdersPayload : isPurchaseRegisterEndpoint(endpointName) ? storePurchaseRegisterPayload : isSalesRegisterEndpoint(endpointName) ? storeSalesRegisterPayload : isSitEndpoint(endpointName) ? storeSitPayload : isOrderBookEndpoint(endpointName) ? storeOrderBookPayload : isUserDropdownEndpoint(endpointName) ? storeUserDropdownPayload : isZcashFlowEndpoint(endpointName) ? storeZcashFlowPayload : isOpenSalesOrdersEndpoint(endpointName) ? storeOpenSalesOrdersPayload : storeZfisalesPayload)(payload, endpointName, outbound, {
+  const counts = await (isDailyProductionEndpoint(endpointName) ? storeDailyProductionPayload : isCurrentStockEndpoint(endpointName) ? storeCurrentStockPayload : isOpenPoEndpoint(endpointName) ? storeOpenPoPayload : isPurchaseOrdersEndpoint(endpointName) ? storePurchaseOrdersPayload : isPurchaseRegisterEndpoint(endpointName) ? storePurchaseRegisterPayload : isSalesRegisterEndpoint(endpointName) ? storeSalesRegisterPayload : isSitEndpoint(endpointName) ? storeSitPayload : isOrderBookEndpoint(endpointName) ? storeOrderBookPayload : isUserDropdownEndpoint(endpointName) ? storeUserDropdownPayload : isZcashFlowEndpoint(endpointName) ? storeZcashFlowPayload : isOpenSalesOrdersEndpoint(endpointName) ? storeOpenSalesOrdersPayload : storeZfisalesPayload)(payload, endpointName, outbound, {
     durationMs,
     responseBytes: bytes,
     httpStatus: response.status,
