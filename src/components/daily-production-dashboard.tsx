@@ -77,9 +77,9 @@ export function DailyProductionDashboard({ rows }: { rows: DprRow[] }) {
     {dates.length ? <p data-pdf-exclude className="text-[11px] text-muted-foreground">Data available: {ddmm(dates[0]!)} – {ddmm(dates[dates.length - 1]!)}</p> : null}
     <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
       {([
-        ["Production Val", cr(t.value), "#1f6fd1", Factory],
+        ["Production", cr(t.value), "#1f6fd1", Factory],
         ["Production Qty", num(t.qty, 0), "#0f9d8a", Package],
-        ["Scrap Val", cr(t.scrapVal), "#d64550", Trash2],
+        ["Scrap", cr(t.scrapVal), "#d64550", Trash2],
         ["Scrap Qty", num(t.scrapQty), "#e07b39", AlertTriangle],
         ["Scrap %", `${t.scrapPct.toFixed(2)}%`, "#7b4fd6", Gauge],
         ["Prod. Orders", num(t.orders, 0), "#2f8f4e", ClipboardList],
