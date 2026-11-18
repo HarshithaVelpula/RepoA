@@ -25,14 +25,18 @@ export function valuationLookup(rows: Record<string, string>[]): Map<string, str
 /** Pure: profit centre → main/sub groups from ZPC GROUP. */
 export function zpcLookup(rows: Record<string, string>[]): Map<string, [string, string, string, string]> {
   const m = new Map<string, [string, string, string, string]>();
-  for (const r of rows) { const c = t(pick(r, "PRCTR")); if (c) m.set(strip0(c), [t(pick(r, "MNGRP1")), t(pick(r, "PCGRP1")), t(pick(r, "PCGRP2")), t(pick(r, "PCGRP3"))]); }
+  for (const r of rows) {
+    const g: [string, string, string, string] = [t(pick(r, "MNGRP1")), t(pick(r, "PCGRP1")), t(pick(r, "PCGRP2")), t(pick(r, "PCGRP3"))];
+    const c = t(pick(r, "PRCTR")); if (c) m.set(strip0(c), g);
+    const b = t(pick(r, "BLUPA")); if (b && !m.has(`P:${strip0(b)}`)) m.set(`P:${strip0(b)}`, g); // plant code → groups
+  }
   return m;
 }
 
 export function mapStockRows(raw: { id: string; month: number; year: number; data: Record<string, string> }[], val: Map<string, string>, zpc: Map<string, [string, string, string, string]>): StockRow[] {
   return raw.map((r) => {
-    const d = r.data; const vc = t(pick(d, "ValCl")); const pc = t(pick(d, "Profit Centre"));
-    const g = zpc.get(strip0(pc)) ?? ["", "", "", ""];
+    const d = r.data; const vc = t(pick(d, "ValCl")); const pc = t(pick(d, "Profit Centre")) || t(pick(d, "Profit Center"));
+    const g = (pc && zpc.get(strip0(pc))) || zpc.get(`P:${strip0(t(pick(d, "Plnt")))}`) || ["", "", "", ""];
     return {
       key: r.id, month: r.month, year: r.year, period: `${r.year}-${String(r.month).padStart(2, "0")}`,
       plant: t(pick(d, "Plnt")), location: t(pick(d, "Location")), material: t(pick(d, "Material")), materialName: t(pick(d, "Material Description")),

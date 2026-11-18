@@ -16,7 +16,7 @@ async function lookups() {
 
 /** Database-summed rows (month × ValCl × Profit Centre × Plant, no material): small and fast for tiles/cards. */
 export const monthWiseStockQuery = {
-  queryKey: ["month-wise-stock", "v5-summary"] as const,
+  queryKey: ["month-wise-stock", "v6-summary"] as const,
   queryFn: async (): Promise<StockRow[]> => {
     const [res, lk] = await Promise.all([supabase.rpc("month_wise_stock_summary" as never), lookups()]);
     if (res.error) throw res.error;
@@ -27,7 +27,7 @@ export const monthWiseStockQuery = {
 
 /** Full uploaded rows of one month, only for the detailed table / Excel. */
 export const monthWiseStockMonthQuery = (period: string) => ({
-  queryKey: ["month-wise-stock", "rows", period] as const,
+  queryKey: ["month-wise-stock", "rows-v6", period] as const,
   queryFn: async (): Promise<StockRow[]> => {
     const year = Number(period.slice(0, 4)), month = Number(period.slice(5, 7));
     const raw: Raw[] = []; let last: string | null = null;
@@ -49,7 +49,7 @@ export const monthWiseStockMonthQuery = (period: string) => ({
 
 /** Material-level totals: top 40 materials per month plus every ZKEYRM material (Top Materials + ZKEYRM cards). */
 export const monthWiseStockMaterialsQuery = {
-  queryKey: ["month-wise-stock", "v5-materials"] as const,
+  queryKey: ["month-wise-stock", "v6-materials"] as const,
   queryFn: async (): Promise<StockRow[]> => {
     const ms = await mastersQuery("zrmmat").queryFn();
     const zr = (await Promise.all(ms.map((m) => getMasterRows(m.id)))).flat();
