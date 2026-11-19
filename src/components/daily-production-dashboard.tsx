@@ -48,7 +48,7 @@ export function DailyProductionDashboard({ rows }: { rows: DprRow[] }) {
   }, [rows]);
   const data = useMemo(() => rows.filter((r) => ok(f.plant, r.plant) && ok(f.material, r.material) && ok(f.sloc, r.sloc) && ok(f.wc, r.wc) && ok(f.cc, r.cc) && (!from || r.date >= from) && (!to || r.date <= to)), [rows, f, from, to]);
   const t = dprTotals(data);
-  const wcs = dprGroup(data, (r) => r.wcDesc);
+  const wcs = dprGroup(data, (r) => r.wcDesc).slice(0, 10);
   const ccs = dprGroup(data, (r) => r.ccName).slice(0, 10);
   const mats = dprGroup(data, (r) => r.matDesc).slice(0, 10);
   const scrapMats = dprGroup(data, (r) => r.matDesc, (r) => r.scrapVal).slice(0, 10);
@@ -89,7 +89,7 @@ export function DailyProductionDashboard({ rows }: { rows: DprRow[] }) {
     </div>
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1fr]">
       <Card title="Day Wise Production vs Scrap" sub="Val in Cr" tint="sky"><DailyChart data={dprDaily(data)} /></Card>
-      <Card title="Production by Work Center" sub="Val in Cr" tint="peach"><Donut data={wcs} heads={["Work Center", "Val", "%"]} /></Card>
+      <Card title="Top 10 Work Centers" sub="Val in Cr" tint="peach"><Donut data={wcs} heads={["Work Center", "Val", "%"]} /></Card>
     </div>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
       <Card title="Top 10 Materials Produced" sub="Val in Cr" tint="teal"><BarList data={mats} /></Card>
