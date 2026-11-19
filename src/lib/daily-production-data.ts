@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 export type DprRow = {
   plant: string; plantName: string; stage: string; mvt: string; material: string; matDesc: string; sloc: string; batch: string; qty: number; uom: string;
   order: string; date: string; value: number; rate: number; wc: string; wcDesc: string; cc: string; ccName: string;
-  doc: string; scrapQty: number; scrapVal: number; user: string;
+  doc: string; scrapQty: number; scrapVal: number; user: string; syncedAt: string;
 };
 
 const t = (v: unknown) => (v == null ? "" : String(v)).trim();
@@ -15,7 +15,7 @@ export function toDprRow(r: Rec): DprRow {
     plant: t(r["werks"]), plantName: t(r["plant_short_name"]) || t(r["werks"]), stage: t(r["zstage"]), mvt: t(r["bwart"]), material: t(r["matnr"]), matDesc: t(r["maktx"]) || t(r["matnr"]),
     sloc: t(r["lgort"]), batch: t(r["charg"]), qty: n(r["menge"]), uom: t(r["meins"]), order: t(r["aufnr"]), date: t(r["budat"]),
     value: n(r["dmbtr"]), rate: n(r["rate"]), wc: t(r["arbpl"]), wcDesc: t(r["ktext_up"]) || t(r["arbpl"]), cc: t(r["zkostl"]),
-    ccName: t(r["zkostl_name"]) || t(r["zkostl"]), doc: t(r["mblnr"]), scrapQty: n(r["scrap_qty"]), scrapVal: n(r["scrap_value"]), user: t(r["uname"]) || t(r["usnam"]),
+    ccName: t(r["zkostl_name"]) || t(r["zkostl"]), doc: t(r["mblnr"]), scrapQty: n(r["scrap_qty"]), scrapVal: n(r["scrap_value"]), user: t(r["uname"]) || t(r["usnam"]), syncedAt: t(r["synced_at"]),
   };
 }
 
@@ -30,6 +30,17 @@ export function dprGroup(rows: DprRow[], key: (r: DprRow) => string, val: (r: Dp
   for (const r of rows) { const k = key(r); if (!k) continue; m.set(k, (m.get(k) ?? 0) + val(r)); }
   return [...m].map(([name, value]) => ({ name, value })).filter((d) => d.value > 0).sort((a, b) => b.value - a.value);
 }
+/** Launchpad/screen summary for rows inside [from, to] (ISO dates), plus latest sync time. */
+export function dprPeriodSummary(rows: DprRow[], from: string, to: string) {
+  const inRange = rows.filter((r) => r.date && r.date >= from && r.date <= to);
+  const t = dprTotals(inRange);
+  return { production: t.value, scrap: t.scrapVal, count: inRange.length, syncedAt: dprLastSync(rows) };
+}
+export function dprLastSync(rows: DprRow[]) {
+  let m = "";
+  for (const r of rows) if (r.syncedAt > m) m = r.syncedAt;
+  return m || null;
+}
 /** Day-wise production and scrap value, oldest first. */
 export function dprDaily(rows: DprRow[]) {
   const m = new Map<string, { value: number; scrap: number }>();
@@ -37,7 +48,7 @@ export function dprDaily(rows: DprRow[]) {
   return [...m].sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({ date, ...v }));
 }
 
-const COLS = "id,werks,plant_short_name,zstage,bwart,matnr,maktx,lgort,charg,menge,meins,aufnr,budat,dmbtr,rate,arbpl,ktext_up,zkostl,zkostl_name,mblnr,scrap_qty,scrap_value,uname,usnam";
+const COLS = "id,werks,plant_short_name,zstage,bwart,matnr,maktx,lgort,charg,menge,meins,aufnr,budat,dmbtr,rate,arbpl,ktext_up,zkostl,zkostl_name,mblnr,scrap_qty,scrap_value,uname,usnam,synced_at";
 const PAGE = 1000;
 export async function getDailyProduction(): Promise<DprRow[]> {
   const out: Rec[] = [];
@@ -55,4 +66,4 @@ export async function getDailyProduction(): Promise<DprRow[]> {
   }
   return out.map(toDprRow);
 }
-export const dailyProductionQuery = queryOptions({ queryKey: ["daily-production", "v2"], queryFn: getDailyProduction, staleTime: Infinity, refetchOnWindowFocus: false });
+export const dailyProductionQuery = queryOptions({ queryKey: ["daily-production", "v3"], queryFn: getDailyProduction, staleTime: Infinity, refetchOnWindowFocus: false });

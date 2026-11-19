@@ -1,5 +1,6 @@
 import { DailyProductionDashboard } from "@/components/daily-production-dashboard";
-import { dailyProductionQuery } from "@/lib/daily-production-data";
+import { dailyProductionQuery, dprLastSync } from "@/lib/daily-production-data";
+import { lastSyncedLabel } from "@/lib/report-sync-time";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import hblLogo from "@/assets/hbl-logo.png";
@@ -40,7 +41,11 @@ function Page() {
     catch (e) { toast.error(e instanceof Error ? e.message : "PDF failed"); }
     finally { setBusy(false); }
   };
+  const dates = (stock.data ?? []).map((r) => r.date).filter(Boolean).sort();
+  const dm = (d: string) => d.split("-").reverse().join("-");
   const actions = <>
+    {dates.length ? <span data-pdf-exclude className="hidden h-7 items-center rounded-md border border-primary/30 bg-primary/10 px-2 text-[11px] text-primary sm:inline-flex"><span className="font-medium">Data available:</span>&nbsp;{dm(dates[0]!)} – {dm(dates[dates.length - 1]!)}</span> : null}
+    {stock.data ? <span data-pdf-exclude className="hidden text-[11px] text-muted-foreground md:inline">{lastSyncedLabel(dprLastSync(stock.data))}</span> : null}
     <Button type="button" variant="action" size="sm" className="h-7 text-xs" disabled={stock.isFetching} onClick={() => qc.invalidateQueries({ queryKey: dailyProductionQuery.queryKey })}><RefreshCw className={`size-3.5 ${stock.isFetching ? "animate-spin" : ""}`} />Refresh</Button>
     <SyncNowButton endpointName="Daily_Production_Report" label="Daily Production Report" />
     <Button type="button" variant="export" size="sm" className="h-7 text-xs" onClick={pdf} disabled={busy || !stock.data}><FileDown className="size-3.5" />PDF</Button>

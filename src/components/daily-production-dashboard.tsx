@@ -6,6 +6,7 @@ import { FilterMultiSelect } from "@/components/filter-multi-select";
 import { TINTS } from "@/lib/card-tints";
 import { BarList, Card, Donut, PlantColumns } from "@/components/open-po-dashboard";
 import { datedFileName } from "@/lib/format";
+import { currentReportPeriod } from "@/lib/report-period";
 import { dprDaily, dprGroup, dprTotals, type DprRow } from "@/lib/daily-production-data";
 
 const CR = 1e7;
@@ -35,8 +36,9 @@ function DailyChart({ data }: { data: { date: string; value: number; scrap: numb
 
 export function DailyProductionDashboard({ rows }: { rows: DprRow[] }) {
   const [f, setF] = useState(EMPTY);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const fy = useMemo(() => currentReportPeriod(), []);
+  const [from, setFrom] = useState(fy.from);
+  const [to, setTo] = useState(fy.to);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
@@ -46,7 +48,6 @@ export function DailyProductionDashboard({ rows }: { rows: DprRow[] }) {
   }, [rows]);
   const data = useMemo(() => rows.filter((r) => ok(f.plant, r.plant) && ok(f.material, r.material) && ok(f.sloc, r.sloc) && ok(f.wc, r.wc) && ok(f.cc, r.cc) && (!from || r.date >= from) && (!to || r.date <= to)), [rows, f, from, to]);
   const t = dprTotals(data);
-  const dates = data.map((r) => r.date).filter(Boolean).sort();
   const wcs = dprGroup(data, (r) => r.wcDesc);
   const ccs = dprGroup(data, (r) => r.ccName).slice(0, 10);
   const mats = dprGroup(data, (r) => r.matDesc).slice(0, 10);
@@ -72,9 +73,8 @@ export function DailyProductionDashboard({ rows }: { rows: DprRow[] }) {
     <div data-pdf-exclude className="rounded-xl border border-border shadow-sm" style={TINTS.neutral}>
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center justify-between px-3 py-1.5 text-xs font-semibold text-card-foreground"><span>Filters</span><ChevronDown className={`size-4 transition-transform ${open ? "" : "-rotate-90"}`} /></button>
       {open ? <div className="grid grid-cols-2 gap-2 px-3 pb-2 sm:grid-cols-4 lg:grid-cols-8">{field("plant", "Plant")}{dateInput("Posting Date From", from, setFrom)}{dateInput("To", to, setTo)}{field("material", "Material")}{field("sloc", "Storage Location")}{field("wc", "Work Center")}{field("cc", "Cost Center")}
-        <div className="flex items-end"><Button type="button" variant="reset" size="sm" className="h-8 w-full text-xs" onClick={() => { setF(EMPTY); setFrom(""); setTo(""); setPage(0); }}>Reset</Button></div></div> : null}
+        <div className="flex items-end"><Button type="button" variant="reset" size="sm" className="h-8 w-full text-xs" onClick={() => { setF(EMPTY); setFrom(fy.from); setTo(fy.to); setPage(0); }}>Reset</Button></div></div> : null}
     </div>
-    {dates.length ? <p data-pdf-exclude className="text-[11px] text-muted-foreground">Data available: {ddmm(dates[0]!)} – {ddmm(dates[dates.length - 1]!)}</p> : null}
     <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
       {([
         ["Production", cr(t.value), "#1f6fd1", Factory],
