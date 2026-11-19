@@ -56,8 +56,8 @@ export function DailyProductionDashboard({ rows }: { rows: DprRow[] }) {
   const table = data.filter((r) => !q || `${r.plant} ${r.plantName} ${r.order} ${r.material} ${r.matDesc} ${r.batch} ${r.wc} ${r.wcDesc} ${r.ccName} ${r.doc} ${r.sloc}`.toLowerCase().includes(q.toLowerCase())).sort((a, b) => b.date.localeCompare(a.date) || b.value - a.value);
   const pages = Math.max(1, Math.ceil(table.length / PAGE));
   const tt = dprTotals(table);
-  const HEADS = ["Posting Date", "Plant", "Stage", "Mvt", "Prod. Order", "Material", "Description", "St.Locn", "Batch", "Qty", "UOM", "Rate", "Value (₹)", "Scrap Qty", "Scrap Val (₹)", "Work Center", "WC Desc", "Cost Center", "Mat. Doc", "User"];
-  const cells = (r: DprRow) => [ddmm(r.date), r.plantName, r.stage, r.mvt, r.order, r.material, r.matDesc, r.sloc, r.batch, r.qty, r.uom, r.rate, r.value, r.scrapQty, r.scrapVal, r.wc, r.wcDesc, r.ccName, r.doc, r.user];
+  const HEADS = ["Posting Date", "Plant", "Stage", "Mvt", "Prod. Order", "Material", "Description", "St.Locn", "Batch", "Qty", "UOM", "Rate", "Value (₹)", "Scrap Qty", "Scrap Val (₹)", "Work Center", "WC Desc", "Cost Center", "Mat. Doc"];
+  const cells = (r: DprRow) => [ddmm(r.date), r.plantName, r.stage, r.mvt, r.order, r.material, r.matDesc, r.sloc, r.batch, r.qty, r.uom, r.rate, r.value, r.scrapQty, r.scrapVal, r.wc, r.wcDesc, r.ccName, r.doc];
   const exportXlsx = async () => {
     const { Workbook } = await import("exceljs");
     const wb = new Workbook(); const ws = wb.addWorksheet("Daily Production");
@@ -101,7 +101,7 @@ export function DailyProductionDashboard({ rows }: { rows: DprRow[] }) {
       <div className="mb-2 flex flex-wrap items-center gap-2"><input className="h-8 w-60 rounded-md border border-border bg-background px-2 text-xs" placeholder="Search order, material, work center…" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} /><Button size="sm" variant="outline" onClick={exportXlsx}>Excel</Button><span className="text-[11px] text-muted-foreground">{table.length} lines</span></div>
       <div className="overflow-x-auto"><table className="w-full min-w-[1800px] text-[11px]"><thead><tr className="border-b text-left">{HEADS.map((h) => <th key={h} className="whitespace-nowrap px-2 py-1.5 font-bold">{h}</th>)}</tr></thead>
         <tbody>{table.slice(page * PAGE, page * PAGE + PAGE).map((r, i) => <tr key={i} className="border-b border-border/50">{cells(r).map((v, j) => <td key={j} className={`whitespace-nowrap px-2 py-1 ${typeof v === "number" ? "text-right tabular-nums" : ""}`}>{typeof v === "number" ? num(v) : v}</td>)}</tr>)}</tbody>
-        <tfoot><tr className="border-t-2 border-border font-bold"><td className="px-2 py-1.5" colSpan={9}>Total ({table.length} lines)</td><td className="px-2 py-1.5 text-right tabular-nums">{num(tt.qty)}</td><td /><td /><td className="px-2 py-1.5 text-right tabular-nums">{num(tt.value)}</td><td className="px-2 py-1.5 text-right tabular-nums">{num(tt.scrapQty)}</td><td className="px-2 py-1.5 text-right tabular-nums">{num(tt.scrapVal)}</td><td colSpan={5} /></tr></tfoot></table></div>
+        <tfoot><tr className="border-t-2 border-border font-bold"><td className="px-2 py-1.5" colSpan={9}>Total ({table.length} lines)</td><td className="px-2 py-1.5 text-right tabular-nums">{num(tt.qty)}</td><td /><td /><td className="px-2 py-1.5 text-right tabular-nums">{num(tt.value)}</td><td className="px-2 py-1.5 text-right tabular-nums">{num(tt.scrapQty)}</td><td className="px-2 py-1.5 text-right tabular-nums">{num(tt.scrapVal)}</td><td colSpan={4} /></tr></tfoot></table></div>
       <div className="mt-2 flex items-center gap-2 text-[11px]"><Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(page - 1)}>Prev</Button><span>Page {page + 1} / {pages}</span><Button size="sm" variant="outline" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>Next</Button></div>
     </Card></div>
   </div>;
