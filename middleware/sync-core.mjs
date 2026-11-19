@@ -891,6 +891,7 @@ function mapOpenPoPayload(payload, endpointName, now = /* @__PURE__ */ new Date(
 // ../src/lib/daily-production-map.ts
 var TEXT = {
   WERKS: "werks",
+  PLANT_SHORT_NAME: "plant_short_name",
   ZSTAGE: "zstage",
   BWART: "bwart",
   MATNR: "matnr",
@@ -1457,6 +1458,8 @@ function withDprDates(raw, range, now = /* @__PURE__ */ new Date()) {
     const obj = { ...parsed };
     const iso = (d) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
     const valid = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? "").trim());
+    delete obj["BUDAT_F"];
+    delete obj["BUDAT_T"];
     const window = postingWindow(range, now);
     if (window) {
       obj["FROMDT"] = iso(window.from);

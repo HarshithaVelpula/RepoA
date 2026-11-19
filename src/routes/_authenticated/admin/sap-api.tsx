@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { applyDateWindow, buildPayloadText, parsePayloadFields, stripJsonComments } from "@/lib/payload-fields";
 import { getPayloadPath, setPayloadPaths } from "@/lib/payload-paths";
 import { isOpenPoEndpoint } from "@/lib/open-po-map";
+import { isDailyProductionEndpoint } from "@/lib/daily-production-map";
+const dprIso = (d: string) => (/^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d);
 import { isPurchaseOrdersEndpoint } from "@/lib/purchase-orders-map";
 import { isSitEndpoint } from "@/lib/sit-map";
 import { createFileRoute } from "@tanstack/react-router";
@@ -801,6 +803,15 @@ function withDefaultDates(input: EndpointInput): EndpointInput {
   if (isZcashFlowName(input.name) || isZcashFlowName(input.endpoint_path)) return input;
   if (isOrderBookName(input.name) || isOrderBookName(input.endpoint_path)) return input;
   if (isSitEndpoint(input.name) || isSitEndpoint(input.endpoint_path)) return input;
+  if (isDailyProductionEndpoint(input.name) || isDailyProductionEndpoint(input.endpoint_path)) {
+    const p = parsePayload(input.body_template);
+    if (!p) return input;
+    const { BUDAT_F: _f, BUDAT_T: _t, ...rest } = p;
+    const w = postingWindow(input.posting_range);
+    const iso = (d: string) => (/^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d);
+    if (w) { rest["FROMDT"] = iso(w.from); rest["TODT"] = iso(w.to); }
+    return { ...input, body_template: JSON.stringify(rest, null, 2) };
+  }
   const zme2n = isPurchaseOrdersEndpoint(input.name) || isPurchaseOrdersEndpoint(input.endpoint_path);
   if (zme2n || isOpenPoEndpoint(input.name) || isOpenPoEndpoint(input.endpoint_path)) {
     // Preset windows show today's document dates in the pickers and payload.
@@ -1137,8 +1148,9 @@ function EndpointDetail({
     (!!payload && "ERDAT_F" in payload && "ERDAT_T" in payload);
   const isZcash = !isOrderBook && (isZcashFlowName(form.name) || isZcashFlowName(form.endpoint_path));
   const isSit = isSitEndpoint(form.name) || isSitEndpoint(form.endpoint_path);
+  const isDpr = isDailyProductionEndpoint(form.name) || isDailyProductionEndpoint(form.endpoint_path);
   const usesPostingDates =
-    isOpenPoEndpoint(form.name) || isOpenPoEndpoint(form.endpoint_path) ||
+    isDpr || isOpenPoEndpoint(form.name) || isOpenPoEndpoint(form.endpoint_path) ||
     isPurchaseOrdersEndpoint(form.name) || isPurchaseOrdersEndpoint(form.endpoint_path) ||
     form.posting_range !== "custom" || !!payload?.["BUDAT_F"] || !!payload?.["BUDAT_T"];
   const usesPayloadFields = !isZcash && !isOpenSalesOrders && (isOrderBook || isSit || /salesregister/i.test(`${form.name}${form.endpoint_path}`.replace(/[^a-z0-9]/gi, "")) || !usesPostingDates);
@@ -1171,8 +1183,8 @@ function EndpointDetail({
   const isZme2n = isPurchaseOrdersEndpoint(form.name) || isPurchaseOrdersEndpoint(form.endpoint_path);
   const isOpenPo = isZme2n || isOpenPoEndpoint(form.name) || isOpenPoEndpoint(form.endpoint_path);
   const isPoList = isZme2n && /BEDAT_FROM/i.test(form.body_template ?? "");
-  const dateFromKey = isPoList ? "BEDAT_FROM" : isZme2n ? "document_date.from_date" : isOpenPo ? "DOCUMENT_DATE.FROM_DATE" : "BUDAT_F";
-  const dateToKey = isPoList ? "BEDAT_TO" : isZme2n ? "document_date.to_date" : isOpenPo ? "DOCUMENT_DATE.TO_DATE" : "BUDAT_T";
+  const dateFromKey = isDpr ? "FROMDT" : isPoList ? "BEDAT_FROM" : isZme2n ? "document_date.from_date" : isOpenPo ? "DOCUMENT_DATE.FROM_DATE" : "BUDAT_F";
+  const dateToKey = isDpr ? "TODT" : isPoList ? "BEDAT_TO" : isZme2n ? "document_date.to_date" : isOpenPo ? "DOCUMENT_DATE.TO_DATE" : "BUDAT_T";
   const dateWord = isOpenPo ? "Document" : "Posting";
   function dateValue(path: string): string {
     return path.includes(".") ? getPayloadPath(form.body_template, path) : payloadValue(path);
@@ -1404,7 +1416,7 @@ function EndpointDetail({
                     const range = value as EndpointInput["posting_range"];
                     set("posting_range", range);
                     const rolling = postingWindow(range);
-                    if (rolling) applyPayloadValues({ [dateFromKey]: isOpenPo && !isPoList && range === "today" ? "" : rolling.from, [dateToKey]: rolling.to });
+                    if (rolling) applyPayloadValues(isDpr ? { FROMDT: dprIso(rolling.from), TODT: dprIso(rolling.to) } : { [dateFromKey]: isOpenPo && !isPoList && range === "today" ? "" : rolling.from, [dateToKey]: rolling.to });
                   }}
                 >
                   <SelectTrigger>
@@ -1419,23 +1431,23 @@ function EndpointDetail({
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label={`${dateWord} From Date`} hint={`Sent as ${dateFromKey} (YYYYMMDD).`}>
+              <Field label={`${dateWord} From Date`} hint={`Sent as ${dateFromKey} (${isDpr ? "YYYY-MM-DD" : "YYYYMMDD"}).`}>
                 <Input
                   type="date"
-                  value={fromSapDate(dateValue(dateFromKey))}
+                  value={isDpr ? dateValue(dateFromKey) : fromSapDate(dateValue(dateFromKey))}
                   onChange={(e) => {
                     set("posting_range", "custom");
-                    applyPayloadValues({ [dateFromKey]: toSapDate(e.target.value) });
+                    applyPayloadValues({ [dateFromKey]: isDpr ? e.target.value : toSapDate(e.target.value) });
                   }}
                 />
               </Field>
-              <Field label={`${dateWord} To Date`} hint={`Sent as ${dateToKey} (YYYYMMDD).`}>
+              <Field label={`${dateWord} To Date`} hint={`Sent as ${dateToKey} (${isDpr ? "YYYY-MM-DD" : "YYYYMMDD"}).`}>
                 <Input
                   type="date"
-                  value={fromSapDate(dateValue(dateToKey))}
+                  value={isDpr ? dateValue(dateToKey) : fromSapDate(dateValue(dateToKey))}
                   onChange={(e) => {
                     set("posting_range", "custom");
-                    applyPayloadValues({ [dateToKey]: toSapDate(e.target.value) });
+                    applyPayloadValues({ [dateToKey]: isDpr ? e.target.value : toSapDate(e.target.value) });
                   }}
                 />
               </Field>
@@ -1458,7 +1470,7 @@ function EndpointDetail({
                   : isOpenPo
                   ? "Sent as the request body. DOCUMENT_DATE stays in sync with the fields above."
                   : usesPostingDates
-                  ? "Sent as the request body. BUDAT_F / BUDAT_T stay in sync with the date pickers above."
+                  ? `Sent as the request body. ${isDpr ? "FROMDT / TODT stay" : "BUDAT_F / BUDAT_T stay"} in sync with the date pickers above.`
                   : "Sent as the request body exactly as saved."
               }
             >

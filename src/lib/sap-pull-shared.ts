@@ -283,6 +283,7 @@ export function withDprDates(raw: string | null | undefined, range?: string | nu
     const obj = { ...(parsed as Record<string, unknown>) };
     const iso = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
     const valid = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? "").trim());
+    delete obj["BUDAT_F"]; delete obj["BUDAT_T"];
     const window = postingWindow(range, now);
     if (window) { obj["FROMDT"] = iso(window.from); obj["TODT"] = iso(window.to); }
     else {

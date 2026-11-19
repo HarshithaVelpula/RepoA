@@ -351,6 +351,13 @@
       "when": 1794990641302,
       "tag": "0049_daily_production",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795083261558,
+      "tag": "0050_daily_production_plant_short_name",
+      "breakpoints": true
     }
   ]
 }

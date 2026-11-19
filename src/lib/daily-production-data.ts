@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 export type DprRow = {
-  plant: string; stage: string; mvt: string; material: string; matDesc: string; sloc: string; batch: string; qty: number; uom: string;
+  plant: string; plantName: string; stage: string; mvt: string; material: string; matDesc: string; sloc: string; batch: string; qty: number; uom: string;
   order: string; date: string; value: number; rate: number; wc: string; wcDesc: string; cc: string; ccName: string;
   doc: string; scrapQty: number; scrapVal: number; user: string;
 };
@@ -12,7 +12,7 @@ const n = (v: unknown) => Number(v) || 0;
 type Rec = Record<string, unknown>;
 export function toDprRow(r: Rec): DprRow {
   return {
-    plant: t(r["werks"]), stage: t(r["zstage"]), mvt: t(r["bwart"]), material: t(r["matnr"]), matDesc: t(r["maktx"]) || t(r["matnr"]),
+    plant: t(r["werks"]), plantName: t(r["plant_short_name"]) || t(r["werks"]), stage: t(r["zstage"]), mvt: t(r["bwart"]), material: t(r["matnr"]), matDesc: t(r["maktx"]) || t(r["matnr"]),
     sloc: t(r["lgort"]), batch: t(r["charg"]), qty: n(r["menge"]), uom: t(r["meins"]), order: t(r["aufnr"]), date: t(r["budat"]),
     value: n(r["dmbtr"]), rate: n(r["rate"]), wc: t(r["arbpl"]), wcDesc: t(r["ktext_up"]) || t(r["arbpl"]), cc: t(r["zkostl"]),
     ccName: t(r["zkostl_name"]) || t(r["zkostl"]), doc: t(r["mblnr"]), scrapQty: n(r["scrap_qty"]), scrapVal: n(r["scrap_value"]), user: t(r["uname"]) || t(r["usnam"]),
@@ -37,7 +37,7 @@ export function dprDaily(rows: DprRow[]) {
   return [...m].sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({ date, ...v }));
 }
 
-const COLS = "id,werks,zstage,bwart,matnr,maktx,lgort,charg,menge,meins,aufnr,budat,dmbtr,rate,arbpl,ktext_up,zkostl,zkostl_name,mblnr,scrap_qty,scrap_value,uname,usnam";
+const COLS = "id,werks,plant_short_name,zstage,bwart,matnr,maktx,lgort,charg,menge,meins,aufnr,budat,dmbtr,rate,arbpl,ktext_up,zkostl,zkostl_name,mblnr,scrap_qty,scrap_value,uname,usnam";
 const PAGE = 1000;
 export async function getDailyProduction(): Promise<DprRow[]> {
   const out: Rec[] = [];
@@ -55,4 +55,4 @@ export async function getDailyProduction(): Promise<DprRow[]> {
   }
   return out.map(toDprRow);
 }
-export const dailyProductionQuery = queryOptions({ queryKey: ["daily-production", "v1"], queryFn: getDailyProduction, staleTime: Infinity, refetchOnWindowFocus: false });
+export const dailyProductionQuery = queryOptions({ queryKey: ["daily-production", "v2"], queryFn: getDailyProduction, staleTime: Infinity, refetchOnWindowFocus: false });

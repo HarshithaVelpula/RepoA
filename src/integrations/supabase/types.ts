@@ -141,6 +141,7 @@ export type Database = {
           model: string | null
           name1: string | null
           neg_plates: number | null
+          plant_short_name: string | null
           pos_plates: number | null
           range_txt: string | null
           rate: number | null
@@ -195,6 +196,7 @@ export type Database = {
           model?: string | null
           name1?: string | null
           neg_plates?: number | null
+          plant_short_name?: string | null
           pos_plates?: number | null
           range_txt?: string | null
           rate?: number | null
@@ -249,6 +251,7 @@ export type Database = {
           model?: string | null
           name1?: string | null
           neg_plates?: number | null
+          plant_short_name?: string | null
           pos_plates?: number | null
           range_txt?: string | null
           rate?: number | null

@@ -5,7 +5,7 @@
 import { orderBookNum } from "./order-book-map";
 
 const TEXT: Record<string, string> = {
-  WERKS: "werks", ZSTAGE: "zstage", BWART: "bwart", MATNR: "matnr", LGORT: "lgort", CHARG: "charg", MEINS: "meins", AUFNR: "aufnr",
+  WERKS: "werks", PLANT_SHORT_NAME: "plant_short_name", ZSTAGE: "zstage", BWART: "bwart", MATNR: "matnr", LGORT: "lgort", CHARG: "charg", MEINS: "meins", AUFNR: "aufnr",
   MAKTX: "maktx", KDAUF: "kdauf", KDPOS: "kdpos", WAERS: "waers", ARBPL: "arbpl", KTEXT_UP: "ktext_up", STLBEZ: "stlbez", NAME1: "name1",
   MODEL: "model", RANGE: "range_txt", TYPE: "type_txt", COMB: "comb", CONT_REF: "cont_ref", CELL_TYPE: "cell_type", STAGE: "stage",
   ZKOSTL: "zkostl", ZKOSTL_NAME: "zkostl_name", USNAM: "usnam", UNAME: "uname",
