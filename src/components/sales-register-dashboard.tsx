@@ -6,6 +6,7 @@ import { summarizeGroupsByDivision } from "@/lib/open-orders-groups";
 import { FileText, IndianRupee, Receipt, Search, Users, BarChart3, FileSpreadsheet } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ComposedChart, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
 import { downloadSalesRegisterExcel } from "@/lib/sales-register-export";
+import { TINTS, type Tint } from "@/lib/card-tints";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toCr, toLah, buildSalesRegister, salesRegisterGroupRows, salesRegisterTrend, type SalesRegisterDateRange, type SalesRegisterRow } from "@/lib/sales-register";
@@ -14,9 +15,12 @@ const COLORS = ["#1f6fd1", "#0f9d8a", "#2e8b57", "#e08a1e", "#8e44ad", "#d64550"
 const cr = (v: number) => Math.round((v / 1e7) * 100) / 100;
 const inr = (v: number) => `₹ ${Math.round(v).toLocaleString("en-IN")}`;
 
-function Card({ title, children, className = "" }: { title: string; children: ReactNode; className?: string }) {
-  return <section className={`flex min-w-0 flex-col rounded-xl border border-border bg-card p-2 shadow-sm ${className}`}>
-    <h2 className="mb-1 text-xs font-semibold text-card-foreground">{title}</h2>
+const CARD_TINTS: Tint[] = ["sky", "peach", "teal", "violet", "amber", "mint", "rose", "steel"];
+const tintFor = (t: string) => CARD_TINTS[[...t].reduce((a, c) => a + c.charCodeAt(0), 0) % CARD_TINTS.length]!;
+function Card({ title, children, className = "", tint }: { title: string; children: ReactNode; className?: string; tint?: Tint }) {
+  const st = TINTS[tint ?? tintFor(title)];
+  return <section className={`flex min-w-0 flex-col rounded-xl border p-2 shadow-sm ${className}`} style={st}>
+    <h2 className="mb-1 self-start border-b-2 pb-0.5 text-xs font-bold text-foreground" style={{ borderColor: st.borderColor }}>{title}</h2>
     <div className="min-h-0 flex-1">{children}</div>
   </section>;
 }
@@ -133,7 +137,7 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
         {([["cgst", 0], ["sgst", 3], ["igst", 4]] as const).map(([k, c]) => <Bar key={k} dataKey={k} name={k.toUpperCase()} stackId="t" fill={`url(#sr-tax-${c})`} />)}
       </BarChart></ResponsiveContainer> : <Empty />}</Card>
     </div>
-    <section className="rounded-xl border border-border bg-card shadow-sm">
+    <section data-pdf-exclude className="rounded-xl border border-border bg-card shadow-sm">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-border px-3 py-2">
         <h2 className="flex min-w-0 items-center gap-2 truncate text-xs font-semibold"><BarChart3 className="size-4 shrink-0 text-primary" />Sales Register Details</h2>
         <div className="flex items-center gap-2">

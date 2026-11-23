@@ -1,3 +1,4 @@
+import hblLogo from "@/assets/hbl-logo.png";
 import { SyncNowButton } from "@/components/sync-now-button";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
@@ -41,7 +42,7 @@ function SalesRegisterPage() {
   const range = buildSalesRegister(all).dateRange;
   const pdf = async () => {
     setBusy(true);
-    try { await exportDashboardPdf(ref.current, datedFileName("Sales Register", "pdf")); }
+    try { await exportDashboardPdf(ref.current, datedFileName("Sales Register", "pdf"), "[data-pdf-exclude]", { headerSelector: "[data-pdf-header]", footerText: "HBL Confidential — Internal Use Only", preserveComputedChartColors: true }); }
     catch (e) { toast.error(e instanceof Error ? e.message : "PDF failed"); }
     finally { setBusy(false); }
   };
@@ -53,8 +54,9 @@ function SalesRegisterPage() {
   </>;
   return <ReportShell title="Sales Register" compact actions={allowed ? actions : undefined}>
     {!isLoading && !allowed ? <AccessDenied area="Sales Register" /> : <div ref={ref} className="space-y-3">
+      {busy ? <div data-pdf-header className="flex items-center justify-between gap-6 border-b border-border bg-card px-4 py-3"><div className="min-w-0"><img src={hblLogo} alt="HBL" className="h-10 w-auto object-contain" /><p className="mt-1 text-xs font-semibold text-card-foreground">HBL Engineering Limited</p></div><div className="text-right"><h1 className="text-lg font-bold text-card-foreground">Sales Register</h1><p className="text-[11px] font-medium text-muted-foreground">Val in Cr</p></div></div> : null}
       {query.error ? <p className="text-xs text-destructive">{query.error.message}</p> : null}
-      <SalesRegisterFilters defaultOpen={false} rows={all} value={filters} onChange={setFilters} />
+      <div data-pdf-exclude><SalesRegisterFilters defaultOpen={false} rows={all} value={filters} onChange={setFilters} /></div>
       <SalesRegisterDashboard rows={rows} range={filters.dates.billingDate} />
     </div>}
   </ReportShell>;

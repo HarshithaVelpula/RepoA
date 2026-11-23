@@ -206,7 +206,7 @@ export function PurchaseRegisterDashboard({ rows, prevYearRows, years, year, onY
           <tbody>{plants.map((r, i) => <tr key={r.code} className="border-t border-border/60"><td className="px-1.5 py-0.5 font-medium text-primary"><span className="mr-1 inline-block size-2 rounded-sm" style={{ background: COLORS[i % COLORS.length] }} />{r.code}</td><td className="truncate px-1.5 py-0.5">{plantInfo.get(r.code)?.full || "-"}</td><td className="px-1.5 py-0.5">{plantInfo.get(r.code)?.sh || "-"}</td><td className="px-1.5 py-0.5 text-right tabular-nums">{fmt(r.value)}</td></tr>)}</tbody>
           <tfoot><tr className="border-t-2 border-border bg-muted font-semibold"><td className="px-1.5 py-1" colSpan={3}>Total</td><td className="px-1.5 py-1 text-right tabular-nums">{fmt(sumValues(plants))}</td></tr></tfoot></table></Card>
     </div>
-    <DetailsTable rows={filtered} />
+    <div data-pdf-exclude><DetailsTable rows={filtered} /></div>
   </div>;
 }
 

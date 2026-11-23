@@ -114,7 +114,7 @@ export function TbnDashboard({ rows, columns }: { rows: ZtbnRow[]; columns: Ztbn
   const downloadPdf = async () => {
     setIsExporting(true);
     try {
-      await exportDashboardPdf(reportRef.current, datedFileName("TBN", "pdf"));
+      await exportDashboardPdf(reportRef.current, datedFileName("TBN", "pdf"), "[data-pdf-exclude]", { footerText: "HBL Confidential — Internal Use Only", preserveComputedChartColors: true });
       toast.success("TBN report downloaded");
     } catch {
       toast.error("Unable to create the TBN report");

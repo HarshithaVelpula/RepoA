@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Bar, BarChart, CartesianGrid, LabelList, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, Cell, CartesianGrid, LabelList, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { GroupDivisionSummary } from "@/lib/open-orders-groups";
 
 const PALETTE = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--quick-view-violet)", "var(--kpi-6)", "var(--success)", "var(--warning)", "var(--primary)"];
@@ -35,12 +35,17 @@ export function OrderBookSubGroupChart({ groups, divisions, pdf = false, groupLa
             <stop offset="0%" stopColor={`color-mix(in oklab, ${c} 55%, var(--background))`} />
             <stop offset="45%" stopColor={c} />
             <stop offset="100%" stopColor={`color-mix(in oklab, ${c} 75%, var(--foreground))`} />
-          </linearGradient>; })}</defs>
+          </linearGradient>; })}{used.length === 1 ? rows.map((_, j) => { const c = PALETTE[j % PALETTE.length]!; return <linearGradient key={`b${j}`} id={`${id}-b${j}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={`color-mix(in oklab, ${c} 55%, var(--background))`} />
+            <stop offset="45%" stopColor={c} />
+            <stop offset="100%" stopColor={`color-mix(in oklab, ${c} 75%, var(--foreground))`} />
+          </linearGradient>; }) : null}</defs>
           <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis dataKey="name" interval={0} height={70} tickLine={false} tick={({ x, y, payload }) => { const s = String(payload.value); return <g transform={`translate(${x},${y})`}><title>{s}</title><text transform="translate(0,8) rotate(-40)" textAnchor="end" fontSize={10} fill="var(--foreground)">{s.length > 14 ? `${s.slice(0, 14)}…` : s}</text></g>; }} />
           <YAxis tickFormatter={(v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 })} width={44} tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} />
           <Tooltip content={<SubTooltip unit={sit ? "SIT invoices" : "orders"} colors={colors} label={groupLabel} />} cursor={{ fill: "var(--muted)" }} />
           {used.map((d, i) => <Bar key={d} dataKey={d} name={d} stackId="div" fill={`url(#${id}-${i})`} maxBarSize={32} isAnimationActive={!pdf} {...(i === used.length - 1 ? { radius: [4, 4, 0, 0] as [number, number, number, number] } : {})}>
+            {used.length === 1 ? rows.map((_, j) => <Cell key={j} fill={`url(#${id}-b${j})`} />) : null}
             {i === used.length - 1 ? <LabelList dataKey="total" position="top" formatter={(v: number) => Number(v).toFixed(2)} fontSize={9} fill="var(--foreground)" /> : null}
           </Bar>)}
         </BarChart>

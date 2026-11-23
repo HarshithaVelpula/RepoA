@@ -890,6 +890,7 @@ export function SalesByModelChart({
       <div style={{ height: chartHeight, minWidth: exportMode ? 520 : 480 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart layout="vertical" data={data} margin={{ top: 8, right: exportMode ? 140 : 104, bottom: 18, left: 16 }}>
+            <RadiantDefs />
             <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid-line)" horizontal={false} />
             <XAxis
               type="number"
@@ -940,6 +941,7 @@ export function SalesByModelChart({
               maxBarSize={28}
               isAnimationActive={!exportMode}
             >
+              {data.map((_, i) => <Cell key={i} fill={radiantFill(i)} />)}
               <LabelList
                 dataKey="totalAmount"
                 position="right"
@@ -970,6 +972,7 @@ export function ModelWiseChart({ items, exportMode = false }: { items: TypePerfo
       <div style={{ height: chartHeight, minWidth: 480 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart layout="vertical" data={items} margin={{ top: 8, right: exportMode ? 120 : 96, bottom: 18, left: 8 }}>
+            <RadiantDefs />
             <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid-line)" horizontal={false} />
             <XAxis
               type="number"
@@ -1010,6 +1013,7 @@ export function ModelWiseChart({ items, exportMode = false }: { items: TypePerfo
               }}
             />
             <Bar dataKey="totalAmount" name="Sales Amount" fill="var(--kpi-2)" radius={[0, 3, 3, 0]} maxBarSize={28} isAnimationActive={!exportMode}>
+              {items.map((_, i) => <Cell key={i} fill={radiantFill(i)} />)}
               <LabelList dataKey="totalAmount" position="right" formatter={(value: number) => INR_CRORES(value)} fontSize={10} fill="var(--chart-label-strong)" />
             </Bar>
           </BarChart>
@@ -1505,7 +1509,7 @@ function MainGroupBars({
                 }}
               >
                 {categories.map((category, index) => (
-                  <Cell key={category.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                  <Cell key={category.name} fill={radiantFill(index)} />
                 ))}
                 <LabelList dataKey="total" position="top" content={renderBarLabel} />
               </Bar>
@@ -2341,6 +2345,7 @@ export function SdLiveDashboard() {
         blockSelector: "[data-pdf-page-block]",
         sectionBreakSelector: "[data-pdf-section-break]",
         footerText: "HBL Confidential — Internal Use Only",
+        preserveComputedChartColors: true,
       });
       toast.success("Dashboard PDF downloaded");
     } catch (error) {
