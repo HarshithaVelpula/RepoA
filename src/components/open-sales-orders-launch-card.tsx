@@ -17,7 +17,7 @@ type Summary = ReturnType<typeof summarizeLaunchOrders>;
 
 async function fetchOrderBookRows() {
   const pageSize = 1_000;
-  const allRows: { netwr: number | string | null; vtext_dc: string | null; vtweg_auft: string | null; auart: string | null; plant: string | null; profit_center: string | null; created_date: string | null }[] = [];
+  const allRows: { netwr: number | string | null; vtext_dc: string | null; auart: string | null; plant: string | null; profit_center: string | null; created_date: string | null }[] = [];
   for (let page = 0; ; page += 1) {
     const result = await supabase.from("order_book").select("netwr,vtext_dc,auart,plant,profit_center,created_date")
       .order("id", { ascending: true }).range(page * pageSize, (page + 1) * pageSize - 1);
@@ -47,7 +47,7 @@ export function OrderBookLaunchCard({ fallback }: { fallback: React.ReactNode })
 
 async function fetchSitRows() {
   const pageSize = 1_000;
-  const allRows: { vbeln: string | null; netwr_tot: number | string | null; vtext_dc: string | null; vtweg_auft: string | null; auart: string | null; werks: string | null; prctr: string | null; fkdat: string | null }[] = [];
+  const allRows: { vbeln: string | null; netwr_tot: number | string | null; vtext_dc: string | null; auart: string | null; werks: string | null; prctr: string | null; fkdat: string | null }[] = [];
   for (let page = 0; ; page += 1) {
     const result = await supabase.from("sales_in_transit").select("vbeln,netwr_tot,vtext_dc,auart,werks,prctr,fkdat")
       .order("id", { ascending: true }).range(page * pageSize, (page + 1) * pageSize - 1);
