@@ -5,7 +5,10 @@
 2. **Sales by Model and Model Wise Type** — each bar gets its own radiant colour (top-to-bottom gradient, same style as Purchase bars) on every screen where these cards appear, including the launchpad view if shown.
 3. **PDFs** — the tinted card backgrounds and radiant bars are kept in the PDF exactly as on screen (Net Sales, Sales Register and other SD PDFs). Tables stay out of PDFs; header/logo/footer unchanged.
 
+4. **Inventory and Production Planning** — same tinted radiant card backgrounds on Current Stock, Month Wise Stock, Inventory Aging and Daily Production Report, on screen and in their PDFs.
+
 ## Technical details
+- Apply the same tinted Card to current-stock-dashboard.tsx, month-wise-stock-dashboard.tsx and daily-production-dashboard.tsx (and Inventory Aging if it has cards).
 - Reuse `TINTS` from src/lib/card-tints.ts; add a title→tint map in sd-live-dashboard.tsx and model-type-cards.tsx, replacing `bg-card` section styling with the tint style + bordered heading (same as purchase-register `Card`).
 - model-type-cards.tsx: add per-bar `<linearGradient>` defs and `<Cell fill="url(#id-i)">` for each bar, verifying the previous change actually reaches the rendered chart (unique gradient ids per card so they don't clash).
 - PDF capture already preserves screen colours; confirm gradient defs render in the captured image.
