@@ -38,7 +38,7 @@ export function OrderBookLaunchCard({ fallback }: { fallback: React.ReactNode })
   const access = useUserAccess();
   const period = useMemo(() => currentReportPeriod(), []);
   const data = useMemo(() => rows ? summarizeLaunchOrders(scopeRowsToAssigned(rows.filter((r) => inReportPeriod(r.created_date, period)), access, { plant: (r) => r.plant, profitCentre: (r) => r.profit_center })
-    .map((r) => ({ p_value1: r.netwr, sales_type: r.vtweg_auft && r.vtext_dc ? `${r.vtweg_auft} — ${r.vtext_dc}` : r.vtext_dc, order_type: r.vtweg_auft || r.auart })), { byCode: true, all: true }) : undefined, [rows, access, period]);
+    .map((r) => ({ p_value1: r.netwr, sales_type: r.vtext_dc, order_type: r.auart })), { byCode: true, all: true }) : undefined, [rows, access, period]);
   const { data: lastSynced } = useReportSync("order-book");
   if (isLoading) return <div className="h-[188px] w-full animate-pulse rounded-2xl border border-border bg-launchpad-tile" />;
   if (!data) return <>{fallback}</>;
