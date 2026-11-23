@@ -12,3 +12,6 @@
 - Launchpad Sales Register tile already uses NETWR_EX — no change.
 - Add a small test: channel totals add up to the Net Value total.
 - Production: after this is published / static build is redeployed (dist upload), a Refresh shows the matching numbers. No SAP sync needed.
+
+## Table and Excel
+- Sales Register detailed table and Excel: add an **Invoice Value (₹)** column (NETWR_T, with tax), full ₹ values, next to Net Value (₹) (NETWR_EX). The totals row adds it too.
