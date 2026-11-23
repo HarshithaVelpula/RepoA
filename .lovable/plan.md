@@ -10,3 +10,8 @@
 - `sales-register.ts`: `byChannel` groups by the channel description only (`r.channel || r.channelCode`).
 - `sales-register-dashboard.tsx`: the `showBoth` legend line drops the `· %` part.
 - Update `sales-register.test.ts` if it relies on the channel label.
+
+## Also
+- PDF: same names-and-values-only list.
+- Launchpad Sales Register tile: channel lines show names only (no "01 —" codes), with Net Sales values (without tax).
+- Screen: the donut centre label "Total Sales" becomes "Net Sales". Bars, donuts and tiles all use Net Sales (NETWR_EX).
