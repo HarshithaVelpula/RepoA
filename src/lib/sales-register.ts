@@ -95,7 +95,7 @@ export type Named = { name: string; value: number };
 
 function rollup(rows: SalesRegisterRow[], pick: (r: SalesRegisterRow) => string): Named[] {
   const m = new Map<string, number>();
-  for (const r of rows) m.set(pick(r) || "Unassigned", (m.get(pick(r) || "Unassigned") ?? 0) + r.invoiceValue);
+  for (const r of rows) m.set(pick(r) || "Unassigned", (m.get(pick(r) || "Unassigned") ?? 0) + r.netValue);
   return [...m].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
 }
 

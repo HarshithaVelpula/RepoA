@@ -16,7 +16,7 @@ export const SALES_REGISTER_EXPORT_COLUMNS: [string, (r: SalesRegisterRow) => st
   ["Sales Document", (r) => r.salesDocument], ["Sales Document Item", (r) => r.salesDocumentItem],
   ["Main Group", (r) => r.mainGroup], ["Sub Group", (r) => r.subGroup],
   ["Material Code", (r) => r.materialCode], ["Material Description", (r) => r.material],
-  ["Billed Qty", (r) => r.billedQty], ["Net Value (₹)", (r) => inr2(r.netValue)],
+  ["Billed Qty", (r) => r.billedQty], ["Net Value (₹)", (r) => inr2(r.netValue)], ["Invoice Value (₹)", (r) => inr2(r.invoiceValue)],
   ["CGST (₹)", (r) => inr2(r.cgst)], ["SGST (₹)", (r) => inr2(r.sgst)], ["IGST (₹)", (r) => inr2(r.igst)], ["TCS (₹)", (r) => r.tcs],
   ["Posting Status", (r) => r.status],
 ];

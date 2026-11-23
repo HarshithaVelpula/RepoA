@@ -143,7 +143,7 @@ export async function exportDashboardPdf(
   const headerElement = options?.headerSelector
     ? container.querySelector<HTMLElement>(options.headerSelector)
     : null;
-  const blocks = options?.blockSelector
+  let blocks = options?.blockSelector
     ? Array.from(container.querySelectorAll<HTMLElement>(options.blockSelector)).filter(
         (block) => !block.matches(excludeSelector) && block !== headerElement,
       )
@@ -151,6 +151,19 @@ export async function exportDashboardPdf(
         (child): child is HTMLElement =>
           child instanceof HTMLElement && !child.matches(excludeSelector) && child !== headerElement,
       );
+  if (!options?.blockSelector) {
+    // Split tall stacked wrappers into their visual rows so each row fills the page width.
+    const keep = (el: Element): el is HTMLElement =>
+      el instanceof HTMLElement && !el.matches(excludeSelector) && el !== headerElement && el.getBoundingClientRect().height > 0;
+    for (let i = 0; i < blocks.length; i += 1) {
+      const el = blocks[i]!;
+      const style = getComputedStyle(el);
+      const stacked = style.display === "block" || ((style.display === "flex" || style.display === "inline-flex") && style.flexDirection === "column");
+      const rect = el.getBoundingClientRect();
+      const kids = Array.from(el.children).filter(keep);
+      if (stacked && kids.length > 1 && rect.height > rect.width * 0.6) { blocks.splice(i, 1, ...kids); i -= 1; }
+    }
+  }
   if (!blocks.length) throw new Error("No dashboard sections are available for export");
 
   const capture = async (element: HTMLElement) => {
@@ -179,7 +192,7 @@ export async function exportDashboardPdf(
           : "#ffffff",
       cacheBust: true,
       pixelRatio: 2,
-      skipFonts: true,
+      skipFonts: false,
       filter: (node) => !(node instanceof HTMLElement && node.matches(excludeSelector)),
       });
     } finally {

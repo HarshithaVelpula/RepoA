@@ -42,7 +42,7 @@ function SalesRegisterPage() {
   const range = buildSalesRegister(all).dateRange;
   const pdf = async () => {
     setBusy(true);
-    try { await exportDashboardPdf(ref.current, datedFileName("Sales Register", "pdf"), "[data-pdf-exclude]", { headerSelector: "[data-pdf-header]", footerText: "HBL Confidential — Internal Use Only", preserveComputedChartColors: true }); }
+    try { await exportDashboardPdf(ref.current, datedFileName("Sales Register", "pdf"), "[data-pdf-exclude]", { headerSelector: "[data-pdf-header]", blockSelector: "[data-pdf-block]", footerText: "HBL Confidential — Internal Use Only", preserveComputedChartColors: true }); }
     catch (e) { toast.error(e instanceof Error ? e.message : "PDF failed"); }
     finally { setBusy(false); }
   };

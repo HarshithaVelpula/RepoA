@@ -97,36 +97,36 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
   const has = rows.length > 0;
   const sum = (k: "billedQty" | "netValue" | "invoiceValue" | "cgst" | "sgst" | "igst") => filtered.reduce((s, r) => s + r[k], 0);
   const channels = [...new Set(rows.map((r) => r.channelCode || r.channel))];
-  const heads = ["#", "Bill. Date", "Bill. Doc. No", "Invoice No", "Customer Name", "Industry Name", "Segment", "Distribution Channel", "Plant", "Profit Center", "Main Group / Sub Group", "Material Description", "Billed Qty", "Net Value (₹)", "CGST (₹)", "SGST (₹)", "IGST (₹)", "Posting Status"];
+  const heads = ["#", "Bill. Date", "Bill. Doc. No", "Invoice No", "Customer Name", "Industry Name", "Segment", "Distribution Channel", "Plant", "Profit Center", "Main Group / Sub Group", "Material Description", "Billed Qty", "Net Value (₹)", "Invoice Value (₹)", "CGST (₹)", "SGST (₹)", "IGST (₹)", "Posting Status"];
   const R = "text-right tabular-nums whitespace-nowrap";
 
   return <div className="space-y-3">
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div data-pdf-block className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Tile icon={<IndianRupee className="size-5" />} label="Sales Invoices" value={has ? String(a.documents) : "—"} tone="var(--chart-1)" />
       <Tile icon={<FileText className="size-5" />} label="Net Value" value={has ? `₹ ${Math.round(a.totalNet / 1e7).toLocaleString("en-IN")} Cr` : "—"} tone="var(--chart-2)" />
       <Tile icon={<Users className="size-5" />} label="Unique Customers" value={has ? String(a.customers) : "—"} tone="var(--chart-4)" />
       <Tile icon={<Receipt className="size-5" />} label="LAH" value={has ? Math.round(toLah(a.totalAh)).toLocaleString("en-IN") : "—"} tone="var(--chart-3)" />
     </div>
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Card title="Distribution Channel"><Donut data={a.byChannel} total={a.totalInvoice} showBoth /></Card>
+    <div data-pdf-block className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <Card title="Distribution Channel"><Donut data={a.byChannel} total={a.totalNet} showBoth /></Card>
       <Card title="Top 10 Customers"><RankList data={a.topCustomers} /></Card>
       <Card title="Top 10 Profit Centres"><RankList data={a.topProfitCenters} /></Card>
       <Card title="Top 10 Materials"><RankList data={a.topMaterials} /></Card>
     </div>
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+    <div data-pdf-block className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       <Card title="Sales by Plant (Top 10)"><PlantColumns data={a.byPlant} /></Card>
       <div className="min-w-0 lg:col-span-2"><Card title="Sales by Main Group">{has ? <OrderBookSubGroupChart groups={main.groups} divisions={main.divisions} groupLabel="Main Group" /> : <Empty />}</Card></div>
     </div>
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div data-pdf-block className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {([["Sub Group 1", sub], ["Sub Group 2", sub2], ["Sub Group 3", sub3]] as const).map(([label, g]) => <Card key={label} title={`Sales by ${label}`}>{g.groups.length ? <OrderBookSubGroupChart groups={g.groups} divisions={g.divisions} groupLabel={label} /> : <Empty />}</Card>)}
     </div>
-    {(industries.length > 0 || segments.length > 0 || salesMen.length > 0) && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    {(industries.length > 0 || segments.length > 0 || salesMen.length > 0) && <div data-pdf-block className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {salesMen.length > 0 && <Card title="Top 10 Sales Men"><div className="max-h-[260px] overflow-auto"><RankList data={salesMen} /></div></Card>}
       {industries.length > 0 && <Card title="Top 10 Industry Name"><div className="max-h-[260px] overflow-auto"><RankList data={industries.slice(0, 10)} /></div></Card>}
       {segments.length > 0 && <Card title="Segment"><Donut data={segments} total={segments.reduce((s, d) => s + d.value, 0)} showPercent={false} size={110} /></Card>}
     </div>}
-    <ModelTypeCards rows={rows.map((r) => ({ model: r.model, type: r.productType, amount: r.netValue, ah: r.totalAh }))} />
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div data-pdf-block><ModelTypeCards rows={rows.map((r) => ({ model: r.model, type: r.productType, amount: r.netValue, ah: r.totalAh }))} /></div>
+    <div data-pdf-block className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <Card title={`Sales Register (${trend.granularity[0]!.toUpperCase()}${trend.granularity.slice(1)})`}>{trend.points.length ? <ResponsiveContainer width="100%" height={150}><BarChart data={trend.points.map((d) => ({ ...d, net: cr(d.net) }))} margin={{ top: 16, left: -16, right: 4, bottom: 0 }}>
         {grad("sr-trend")}<CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
         <XAxis dataKey="name" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} /><Tooltip formatter={(v: number) => [`₹ ${v} Cr`, "Net Value"]} />
@@ -164,7 +164,7 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
             <TableCell className="whitespace-nowrap">{`${r.mainGroup} / ${r.subGroup}`}</TableCell>
             <TableCell className="min-w-56">{r.material}</TableCell>
             <TableCell className={R}>{(r.billedQty).toLocaleString("en-IN", { maximumFractionDigits: 3 })}</TableCell>
-            <TableCell className={R}>{fullInr(r.netValue)}</TableCell>
+            <TableCell className={R}>{fullInr(r.netValue)}</TableCell><TableCell className={R}>{fullInr(r.invoiceValue)}</TableCell>
                         <TableCell className={R}>{fullInr(r.cgst)}</TableCell>
             <TableCell className={R}>{fullInr(r.sgst)}</TableCell>
             <TableCell className={R}>{fullInr(r.igst)}</TableCell>
@@ -174,7 +174,7 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
         {filtered.length > 0 && <TableFooter><TableRow className="border-t-2 border-border bg-muted text-[11px] font-semibold">
           <TableCell colSpan={12}>Total ({filtered.length} lines)</TableCell>
           <TableCell className={R}>{(sum("billedQty")).toLocaleString("en-IN", { maximumFractionDigits: 3 })}</TableCell>
-          <TableCell className={R}>{fullInr(sum("netValue"))}</TableCell>
+          <TableCell className={R}>{fullInr(sum("netValue"))}</TableCell><TableCell className={R}>{fullInr(sum("invoiceValue"))}</TableCell>
                     <TableCell className={R}>{fullInr(sum("cgst"))}</TableCell>
           <TableCell className={R}>{fullInr(sum("sgst"))}</TableCell>
           <TableCell className={R}>{fullInr(sum("igst"))}</TableCell>
