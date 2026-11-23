@@ -51,11 +51,11 @@ export function toCurrentStockRow(r: Rec): CurrentStockRow {
 const COLS = "matnr,werks,lgort,charg,lgobe,maktx,meins,mtart,labst,wlabs,insme,winsm,speme,wspem,trame,wtram,rowno,shelfno,rackno,binno";
 const PAGE = 1000;
 /** Reads every visible row by keyset on id; falls back to the sample sheet only while SAP has not synced yet. */
-export async function getCurrentStock(): Promise<{ rows: CurrentStockRow[]; sample: boolean }> {
+export async function getCurrentStock(): Promise<{ rows: CurrentStockRow[]; sample: boolean; syncedAt: string | null }> {
   const out: Rec[] = [];
   let after = "";
   for (;;) {
-    let q = supabase.from("current_stock").select(`id,${COLS}`).order("id").limit(PAGE);
+    let q = supabase.from("current_stock").select(`id,synced_at,${COLS}`).order("id").limit(PAGE);
     if (after) q = q.gt("id", after);
     const { data, error } = await q;
     if (error) throw new Error(`Unable to load Current Stock: ${error.message}`);
@@ -63,6 +63,8 @@ export async function getCurrentStock(): Promise<{ rows: CurrentStockRow[]; samp
     if (!data || data.length < PAGE) break;
     after = String((data[data.length - 1] as Rec).id);
   }
-  return { rows: out.map(toCurrentStockRow), sample: false };
+  let syncedAt = "";
+  for (const r of out) { const s = String((r as Record<string, unknown>)["synced_at"] ?? ""); if (s > syncedAt) syncedAt = s; }
+  return { rows: out.map(toCurrentStockRow), sample: false, syncedAt: syncedAt || null };
 }
 export const currentStockQuery = queryOptions({ queryKey: ["current-stock", "v1"], queryFn: getCurrentStock, staleTime: Infinity, refetchOnWindowFocus: false });
