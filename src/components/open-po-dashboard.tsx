@@ -7,7 +7,7 @@ import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, LabelList, Leg
 import { Button } from "@/components/ui/button";
 import { datedFileName } from "@/lib/format";
 import { radiantBar } from "@/lib/radiant";
-import { TINTS, type Tint } from "@/lib/card-tints";
+import { tintForTitle, TINTS, type Tint } from "@/lib/card-tints";
 import { AGING_BUCKETS, agingBucket, istToday, openPoTotals, poStatus, sumBy, type OpenPoRow, type OpenPoStatus } from "@/lib/open-po-data";
 
 const COLORS = ["#1f6fd1", "#0f9d8a", "#e08a1e", "#8e44ad", "#d64550", "#3a8dde", "#16a3b8", "#c0841a", "#5c6bc0", "#2e8b57"];
@@ -20,8 +20,9 @@ const sel = "h-8 w-full rounded-md border border-border bg-background px-2 text-
 
 const STATUSES: OpenPoStatus[] = ["Open", "Partially received", "Overdue", "Delivery complete"];
 
-export function Card({ title, sub, children, className = "", tint = "neutral" }: { title: string; sub?: ReactNode; children: ReactNode; className?: string; tint?: Tint }) {
+export function Card({ title, sub, children, className = "", tint: tintProp }: { title: string; sub?: ReactNode; children: ReactNode; className?: string; tint?: Tint }) {
   const [open, setOpen] = useState(false);
+  const tint = tintProp ?? tintForTitle(title);
   return <section className={`flex min-w-0 flex-col rounded-xl border p-2 ${className}`} style={TINTS[tint]}>
     <div className="mb-2 flex items-center justify-between gap-2"><h2 className="border-b-2 pb-0.5 text-xs font-bold text-foreground" style={{ borderColor: TINTS[tint].borderColor }}>{title}</h2><div className="flex items-center gap-1">{sub ? <span className="text-[10px] font-medium text-foreground/70">{sub}</span> : null}<button type="button" data-pdf-exclude data-html2canvas-ignore aria-label={`Full screen: ${title}`} title="Full screen" onClick={() => setOpen(true)} className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"><Maximize2 className="size-3.5" /></button></div></div>
     <div className="min-h-0 flex-1">{children}</div>

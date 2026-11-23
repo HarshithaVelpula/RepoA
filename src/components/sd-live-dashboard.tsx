@@ -815,7 +815,7 @@ function HBar({
     <ResponsiveContainer width="100%" height={height ?? Math.max(220, data.length * 34)}>
 
       <BarChart data={data} layout="vertical" margin={{ left: 0, right: 76 }}>
-        <RadiantDefs />
+        {RadiantDefs()}
         <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid-line)" horizontal={false} />
         <XAxis type="number" tickFormatter={compact} tick={{ fontSize: 10, fill: "var(--chart-axis-label)" }} stroke="var(--chart-axis-line)" tickLine={false} />
         <YAxis
@@ -890,7 +890,7 @@ export function SalesByModelChart({
       <div style={{ height: chartHeight, minWidth: exportMode ? 520 : 480 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart layout="vertical" data={data} margin={{ top: 8, right: exportMode ? 140 : 104, bottom: 18, left: 16 }}>
-            <RadiantDefs />
+            {RadiantDefs()}
             <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid-line)" horizontal={false} />
             <XAxis
               type="number"
@@ -972,7 +972,7 @@ export function ModelWiseChart({ items, exportMode = false }: { items: TypePerfo
       <div style={{ height: chartHeight, minWidth: 480 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart layout="vertical" data={items} margin={{ top: 8, right: exportMode ? 120 : 96, bottom: 18, left: 8 }}>
-            <RadiantDefs />
+            {RadiantDefs()}
             <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid-line)" horizontal={false} />
             <XAxis
               type="number"
@@ -1145,7 +1145,7 @@ function MixBars({
     <ResponsiveContainer width="100%" height={height ?? Math.max(220, items.length * 46)}>
 
       <BarChart data={items} layout="vertical" margin={{ left: 0, right: 140, top: 4, bottom: 4 }}>
-        <RadiantDefs />
+        {RadiantDefs()}
         <CartesianGrid strokeDasharray="2 6" stroke="var(--chart-grid-line)" horizontal={false} />
         <XAxis type="number" tickFormatter={(value: number) => (value / 1e7).toLocaleString("en-IN", { maximumFractionDigits: 1 })} tick={{ fontSize: 10, fill: "var(--chart-axis-label)" }} stroke="var(--chart-axis-line)" tickLine={false} />
         <YAxis

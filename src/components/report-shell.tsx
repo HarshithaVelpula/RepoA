@@ -1,3 +1,4 @@
+import { TINTS, tintForTitle } from "@/lib/card-tints";
 import { Link } from "@tanstack/react-router";
 import { Maximize2 } from "lucide-react";
 import { ShellBar } from "@/components/shell-bar";
@@ -79,9 +80,9 @@ export function Panel({
     typeof children === "function" ? (children as (f: boolean) => ReactNode)(fullscreen) : children;
 
   return (
-    <section className={`rounded-md border border-border bg-card p-4 shadow-tile ${className}`}>
+    <section className={`rounded-md border p-4 shadow-tile ${className}`} style={TINTS[tintForTitle(title)]}>
       <div className="mb-4 flex items-start justify-between gap-2">
-        <h2 className="text-sm font-medium text-card-foreground">{title}</h2>
+        <h2 className="border-b-2 pb-0.5 text-sm font-semibold text-card-foreground" style={{ borderColor: TINTS[tintForTitle(title)].borderColor }}>{title}</h2>
         <div className="flex shrink-0 items-center gap-1">
           {actions}
           {expandable ? (
