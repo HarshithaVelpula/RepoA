@@ -120,7 +120,7 @@ export function buildSalesRegister(rows: SalesRegisterRow[]) {
     topProfitCenters: rollup(rows, (r) => { const s = r.descs?.["profitCenter"]; return s ? `${r.profitCenter} — ${s}` : r.profitCenter; }).slice(0, 10),
     topMaterials: rollup(rows, (r) => r.material).slice(0, 10),
     byMainGroup: rollup(rows, (r) => r.mainGroup),
-    byChannel: rollup(rows, (r) => r.channelCode && r.channel ? `${r.channelCode} — ${r.channel}` : r.channel || r.channelCode),
+    byChannel: rollup(rows, (r) => r.channel || r.channelCode),
     byCategory: rollup(rows, (r) => r.productCategory).slice(0, 10),
     daily: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)),
     tax: [...tax.values()].sort((a, b) => a.week.localeCompare(b.week)),
