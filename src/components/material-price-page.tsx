@@ -1,3 +1,4 @@
+import { fullInr, inr2 } from "@/lib/format";
 import { useMemo, useState } from "react";
 import { ArrowLeft, Download } from "lucide-react";
 import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Dot, LabelList, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -32,8 +33,8 @@ export function MaterialPricePage({ trend, rows, onBack }: { trend: MaterialTren
   const download = async () => {
     const { Workbook } = await import("exceljs");
     const wb = new Workbook(); const sh = wb.addWorksheet("Purchases");
-    sh.addRow(["Date", "Document No", "Vendor", "Plant", "Quantity", "Unit", "Rate (₹)", "Value (₹ Cr)"]);
-    lines.forEach((r) => sh.addRow([r.date, r.docNo ?? "", r.vendorName, r.plantName, r.qty ?? 0, r.unit ?? "", r.rate ?? 0, r.value]));
+    sh.addRow(["Date", "Document No", "Vendor", "Plant", "Quantity", "Unit", "Rate (₹)", "Value (₹)"]);
+    lines.forEach((r) => sh.addRow([r.date, r.docNo ?? "", r.vendorName, r.plantName, r.qty ?? 0, r.unit ?? "", r.rate ?? 0, inr2(r.value * 1e7)]));
     sh.columns.forEach((c) => { c.width = 18; });
     const url = URL.createObjectURL(new Blob([await wb.xlsx.writeBuffer()], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     const a = document.createElement("a"); a.href = url; a.download = datedFileName(`Purchase Register_${trend.material}`, "xlsx"); a.click();
@@ -146,7 +147,7 @@ export function MaterialPricePage({ trend, rows, onBack }: { trend: MaterialTren
       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2"><h3 className="text-xs font-semibold">Purchases by date</h3><span className="text-[10px] text-muted-foreground">{n0(lines.length)} purchases</span></div>
       <div className="max-h-[480px] overflow-auto"><table className="w-full text-[11px]">
         <thead className="sticky top-0 z-10 text-on-radiant" style={{ background: "linear-gradient(90deg, #1f6fd1, #0f9d8a, #8e44ad)" }}><tr>
-          {["Date", "Document No", "Vendor", "Plant", "Quantity", "Unit", "Rate (₹)", "vs previous", "Value (₹ Cr)"].map((h, i) => <th key={h} className={`px-3 py-2 font-semibold ${i >= 4 && i !== 5 ? "text-right" : "text-left"}`}>{h}</th>)}</tr></thead>
+          {["Date", "Document No", "Vendor", "Plant", "Quantity", "Unit", "Rate (₹)", "vs previous", "Value (₹)"].map((h, i) => <th key={h} className={`px-3 py-2 font-semibold ${i >= 4 && i !== 5 ? "text-right" : "text-left"}`}>{h}</th>)}</tr></thead>
         <tbody>{lines.map((r, i) => {
           const pr = lines.slice(0, i).reverse().find((x) => (x.rate ?? 0) > 0);
           const d = pr && r.rate ? ((r.rate - pr.rate!) / pr.rate!) * 100 : null;
@@ -157,7 +158,7 @@ export function MaterialPricePage({ trend, rows, onBack }: { trend: MaterialTren
           <td className="px-3 py-2 text-right tabular-nums">{n0(r.qty ?? 0)}</td><td className="px-3 py-2">{r.unit ?? ""}</td>
           <td className="px-3 py-2 text-right font-bold tabular-nums">{n2(r.rate ?? 0)}</td>
           <td className="px-3 py-2 text-right">{d == null ? <span className="text-muted-foreground">–</span> : <span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ color: toneOf(d), background: `color-mix(in oklab, ${toneOf(d)} 14%, transparent)` }}>{sp(d)}</span>}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{r.value.toFixed(3)}</td></tr>)}</tbody></table></div>
+          <td className="px-3 py-2 text-right tabular-nums">{fullInr(r.value * 1e7)}</td></tr>)}</tbody></table></div>
     </section>
   </div>;
 }

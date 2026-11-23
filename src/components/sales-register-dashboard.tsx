@@ -1,3 +1,4 @@
+import { fullInr } from "@/lib/format";
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { OrderBookSubGroupChart } from "@/components/order-book-subgroup-chart";
 import { ModelTypeCards } from "@/components/model-type-cards";
@@ -9,7 +10,7 @@ import { downloadSalesRegisterExcel } from "@/lib/sales-register-export";
 import { TINTS, type Tint } from "@/lib/card-tints";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { toCr, toLah, buildSalesRegister, salesRegisterGroupRows, salesRegisterTrend, type SalesRegisterDateRange, type SalesRegisterRow } from "@/lib/sales-register";
+import { toLah, buildSalesRegister, salesRegisterGroupRows, salesRegisterTrend, type SalesRegisterDateRange, type SalesRegisterRow } from "@/lib/sales-register";
 
 const COLORS = ["#1f6fd1", "#0f9d8a", "#2e8b57", "#e08a1e", "#8e44ad", "#d64550", "#3a8dde", "#16a3b8", "#c0841a", "#5c6bc0"];
 const cr = (v: number) => Math.round((v / 1e7) * 100) / 100;
@@ -96,7 +97,7 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
   const has = rows.length > 0;
   const sum = (k: "billedQty" | "netValue" | "invoiceValue" | "cgst" | "sgst" | "igst") => filtered.reduce((s, r) => s + r[k], 0);
   const channels = [...new Set(rows.map((r) => r.channelCode || r.channel))];
-  const heads = ["#", "Bill. Date", "Bill. Doc. No", "Invoice No", "Customer Name", "Industry Name", "Segment", "Distribution Channel", "Plant", "Profit Center", "Main Group / Sub Group", "Material Description", "Billed Qty (LAH)", "Net Value (₹ Cr)", "CGST (LAH)", "SGST (LAH)", "IGST (LAH)", "Posting Status"];
+  const heads = ["#", "Bill. Date", "Bill. Doc. No", "Invoice No", "Customer Name", "Industry Name", "Segment", "Distribution Channel", "Plant", "Profit Center", "Main Group / Sub Group", "Material Description", "Billed Qty (LAH)", "Net Value (₹)", "CGST (LAH)", "SGST (LAH)", "IGST (LAH)", "Posting Status"];
   const R = "text-right tabular-nums whitespace-nowrap";
 
   return <div className="space-y-3">
@@ -163,7 +164,7 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
             <TableCell className="whitespace-nowrap">{`${r.mainGroup} / ${r.subGroup}`}</TableCell>
             <TableCell className="min-w-56">{r.material}</TableCell>
             <TableCell className={R}>{toLah(r.billedQty).toFixed(2)}</TableCell>
-            <TableCell className={R}>{toCr(r.netValue).toFixed(2)}</TableCell>
+            <TableCell className={R}>{fullInr(r.netValue)}</TableCell>
                         <TableCell className={R}>{toLah(r.cgst).toFixed(2)}</TableCell>
             <TableCell className={R}>{toLah(r.sgst).toFixed(2)}</TableCell>
             <TableCell className={R}>{toLah(r.igst).toFixed(2)}</TableCell>
@@ -173,7 +174,7 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
         {filtered.length > 0 && <TableFooter><TableRow className="border-t-2 border-border bg-muted text-[11px] font-semibold">
           <TableCell colSpan={12}>Total ({filtered.length} lines)</TableCell>
           <TableCell className={R}>{toLah(sum("billedQty")).toFixed(2)}</TableCell>
-          <TableCell className={R}>{toCr(sum("netValue")).toFixed(2)}</TableCell>
+          <TableCell className={R}>{fullInr(sum("netValue"))}</TableCell>
                     <TableCell className={R}>{toLah(sum("cgst")).toFixed(2)}</TableCell>
           <TableCell className={R}>{toLah(sum("sgst")).toFixed(2)}</TableCell>
           <TableCell className={R}>{toLah(sum("igst")).toFixed(2)}</TableCell>

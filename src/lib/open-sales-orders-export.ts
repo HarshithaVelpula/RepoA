@@ -2,7 +2,7 @@ import type { OpenSalesOrder } from "@/lib/open-sales-orders-data";
 import { displayOpenOrderDate } from "@/lib/open-sales-orders-table";
 import { channelDescription } from "@/lib/open-sales-orders-filters";
 
-export async function downloadOpenSalesOrdersExcel(rows: OpenSalesOrder[], fileName = "open-sales-orders.xlsx", dateHeader = "Sales Order Creation Date", valueHeader = "Open Value (₹ Cr)", documentTypeLabel: (row: OpenSalesOrder) => string = (row) => row.documentType, ahInLakhs = false) {
+export async function downloadOpenSalesOrdersExcel(rows: OpenSalesOrder[], fileName = "open-sales-orders.xlsx", dateHeader = "Sales Order Creation Date", valueHeader = "Open Value (₹)", documentTypeLabel: (row: OpenSalesOrder) => string = (row) => row.documentType, ahInLakhs = false) {
   const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "HBL Engineering Limited";
@@ -113,7 +113,7 @@ export async function downloadOpenSalesOrdersExcel(rows: OpenSalesOrder[], fileN
     totalAh: row.totalAh,
     unit: row.unit,
     currency: row.currency,
-    value: row.value,
+    value: Math.round(row.value * 1e9) / 100,
     daysOpen: row.daysOpen,
     ldStatus: row.ldStatus ?? "",
     deliveryStatus: row.deliveryStatus,

@@ -1,3 +1,4 @@
+import { fullInr, inr2 } from "@/lib/format";
 import { OrderBookSubGroupChart } from "@/components/order-book-subgroup-chart";
 import { summarizeGroupsByDivision } from "@/lib/open-orders-groups";
 import { useId, useMemo, useState, type ReactNode } from "react";
@@ -164,11 +165,11 @@ function DetailsTable({ rows, today }: { rows: OpenPoRow[]; today: string }) {
     .sort((a, b) => b.poDate.localeCompare(a.poDate) || a.poNo.localeCompare(b.poNo)), [rows, s]);
   const pages = Math.max(1, Math.ceil(list.length / size));
   const p = Math.min(page, pages - 1);
-  const heads = ["PO Date", "PO No", "Item", "PO Type", "Plant", "Vendor", "Main Group", "Sub Group 1", "Sub Group 2", "Sub Group 3", "Material", "SLoc", "UOM", "PO Qty", "PO Value (Cr)", "MIGO Qty", "MIGO Value (Cr)", "Open Value (Cr)", "Delivery Date", "Days"];
-  const num = new Set(["PO Qty", "PO Value (Cr)", "MIGO Qty", "MIGO Value (Cr)", "Open Value (Cr)", "Days"]);
+  const heads = ["PO Date", "PO No", "Item", "PO Type", "Plant", "Vendor", "Main Group", "Sub Group 1", "Sub Group 2", "Sub Group 3", "Material", "SLoc", "UOM", "PO Qty", "PO Value (₹)", "MIGO Qty", "MIGO Value (₹)", "Open Value (₹)", "Delivery Date", "Days"];
+  const num = new Set(["PO Qty", "PO Value (₹)", "MIGO Qty", "MIGO Value (₹)", "Open Value (₹)", "Days"]);
   const t = openPoTotals(list);
   const sumQ = list.reduce((a, r) => ({ po: a.po + r.poQty, migo: a.migo + r.migoQty }), { po: 0, migo: 0 });
-  const c2 = (v: number) => Math.round((v / CR) * 100) / 100;
+  const c2 = inr2;
   const excel = async () => {
     const { Workbook } = await import("exceljs");
     const wb = new Workbook(); const sh = wb.addWorksheet("Open Purchase Orders");
@@ -194,13 +195,13 @@ function DetailsTable({ rows, today }: { rows: OpenPoRow[]; today: string }) {
         <td className="whitespace-nowrap px-2 py-1">{dmy(r.poDate)}</td><td className="px-2 py-1 font-medium text-primary">{r.poNo}</td><td className="px-2 py-1">{r.item}</td><td className="whitespace-nowrap px-2 py-1"><span className="mr-1.5 inline-block size-2.5 rounded-sm align-middle" style={{ background: COLORS[Math.max(0, typeKeys.indexOf(r.poType)) % COLORS.length] }} />{r.poTypeCode ? `${r.poTypeCode} – ${r.poType}` : r.poType}</td>
         <td className="whitespace-nowrap px-2 py-1">{r.plantName}</td><td className="whitespace-nowrap px-2 py-1">{r.vendorName}</td><td className="whitespace-nowrap px-2 py-1">{r.mainGroup}</td><td className="whitespace-nowrap px-2 py-1">{r.subGroup}</td><td className="whitespace-nowrap px-2 py-1">{r.subGroup2}</td><td className="whitespace-nowrap px-2 py-1">{r.subGroup3}</td>
         <td className="min-w-48 px-2 py-1">{r.materialName}</td><td className="px-2 py-1">{r.sloc}</td><td className="px-2 py-1">{r.uom}</td>
-        <td className="px-2 py-1 text-right tabular-nums">{inr(r.poQty)}</td><td className="px-2 py-1 text-right tabular-nums">{cr(r.poValue)}</td>
-        <td className="px-2 py-1 text-right tabular-nums">{inr(r.migoQty)}</td><td className="px-2 py-1 text-right tabular-nums">{cr(r.migoValue)}</td>
-        <td className="px-2 py-1 text-right font-semibold tabular-nums">{cr(r.openValue)}</td><td className="whitespace-nowrap px-2 py-1">{dmy(r.deliveryDate)}</td>
+        <td className="px-2 py-1 text-right tabular-nums">{inr(r.poQty)}</td><td className="px-2 py-1 text-right tabular-nums">{fullInr(r.poValue)}</td>
+        <td className="px-2 py-1 text-right tabular-nums">{inr(r.migoQty)}</td><td className="px-2 py-1 text-right tabular-nums">{fullInr(r.migoValue)}</td>
+        <td className="px-2 py-1 text-right font-semibold tabular-nums">{fullInr(r.openValue)}</td><td className="whitespace-nowrap px-2 py-1">{dmy(r.deliveryDate)}</td>
         <td className="px-2 py-1 text-right tabular-nums">{r.days}</td></tr>)
         : <tr><td colSpan={heads.length} className="h-20 text-center text-muted-foreground">No open purchase orders for these filters.</td></tr>}</tbody>
       {list.length > 0 && <tfoot><tr className="border-t-2 border-border bg-muted font-semibold"><td colSpan={13} className="px-2 py-1.5">Total ({list.length} lines)</td>
-        <td className="px-2 py-1.5 text-right tabular-nums">{inr(sumQ.po)}</td><td className="px-2 py-1.5 text-right tabular-nums">{cr(t.poValue)}</td><td className="px-2 py-1.5 text-right tabular-nums">{inr(sumQ.migo)}</td><td className="px-2 py-1.5 text-right tabular-nums">{cr(t.migoValue)}</td><td className="px-2 py-1.5 text-right tabular-nums">{cr(t.openValue)}</td><td colSpan={2} /></tr></tfoot>}
+        <td className="px-2 py-1.5 text-right tabular-nums">{inr(sumQ.po)}</td><td className="px-2 py-1.5 text-right tabular-nums">{fullInr(t.poValue)}</td><td className="px-2 py-1.5 text-right tabular-nums">{inr(sumQ.migo)}</td><td className="px-2 py-1.5 text-right tabular-nums">{fullInr(t.migoValue)}</td><td className="px-2 py-1.5 text-right tabular-nums">{fullInr(t.openValue)}</td><td colSpan={2} /></tr></tfoot>}
     </table></div>
     <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2 text-xs">
       <span>Rows</span><select value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(0); }} className="rounded border border-border bg-background px-1 py-0.5">{[10, 25, 50].map((n) => <option key={n}>{n}</option>)}</select>

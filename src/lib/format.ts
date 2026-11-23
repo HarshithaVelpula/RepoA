@@ -37,3 +37,8 @@ export function formatSit3(value: number): string {
 export function roundWhole3(value: number): number {
   return Math.round(Number(value.toFixed(3)));
 }
+
+/** Full rupee value for tables/Excel (en-IN grouping, 2 decimals), never Cr. */
+export const fullInr = (n: number) => (Number.isFinite(n) ? n : 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Rounds to 2 decimals for numeric Excel cells. */
+export const inr2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;

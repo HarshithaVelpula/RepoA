@@ -1,5 +1,5 @@
-import { toCr, toLah } from "./sales-register";
-import { datedFileName } from "@/lib/format";
+import { toLah } from "./sales-register";
+import { datedFileName, inr2 } from "@/lib/format";
 import { industryTotals, segmentTotals } from "@/lib/industry-name";
 import type { SalesRegisterRow } from "@/lib/sales-register";
 
@@ -17,7 +17,7 @@ export const SALES_REGISTER_EXPORT_COLUMNS: [string, (r: SalesRegisterRow) => st
   ["Sales Document", (r) => r.salesDocument], ["Sales Document Item", (r) => r.salesDocumentItem],
   ["Main Group", (r) => r.mainGroup], ["Sub Group", (r) => r.subGroup],
   ["Material Code", (r) => r.materialCode], ["Material Description", (r) => r.material],
-  ["Billed Qty (LAH)", (r) => toLah(r.billedQty)], ["Net Value (₹ Cr)", (r) => toCr(r.netValue)],
+  ["Billed Qty (LAH)", (r) => toLah(r.billedQty)], ["Net Value (₹)", (r) => inr2(r.netValue)],
   ["CGST (LAH)", (r) => toLah(r.cgst)], ["SGST (LAH)", (r) => toLah(r.sgst)], ["IGST (LAH)", (r) => toLah(r.igst)], ["TCS (₹)", (r) => r.tcs],
   ["Posting Status", (r) => r.status],
 ];
@@ -32,12 +32,12 @@ export async function downloadSalesRegisterExcel(rows: SalesRegisterRow[]) {
   rows.forEach((r) => sheet.addRow(SALES_REGISTER_EXPORT_COLUMNS.map(([, get]) => get(r))));
   sheet.columns.forEach((c) => { c.width = 20; });
   const ind = wb.addWorksheet("Industry Name");
-  const ih = ind.addRow(["Industry Name", "Net Value (₹ Cr)", "Lines"]); ih.font = { bold: true };
-  industryTotals(rows, (r) => r.industry, (r) => r.netValue).forEach((d) => ind.addRow([d.name, toCr(d.value), d.count]));
+  const ih = ind.addRow(["Industry Name", "Net Value (₹)", "Lines"]); ih.font = { bold: true };
+  industryTotals(rows, (r) => r.industry, (r) => r.netValue).forEach((d) => ind.addRow([d.name, inr2(d.value), d.count]));
   ind.columns.forEach((c) => { c.width = 28; });
   const seg = wb.addWorksheet("Segment");
-  const sh = seg.addRow(["Segment", "Net Value (₹ Cr)", "Lines"]); sh.font = { bold: true };
-  segmentTotals(rows, (r) => r.segmentCode, (r) => r.segmentName, (r) => r.netValue).forEach((d) => seg.addRow([d.name, toCr(d.value), d.count]));
+  const sh = seg.addRow(["Segment", "Net Value (₹)", "Lines"]); sh.font = { bold: true };
+  segmentTotals(rows, (r) => r.segmentCode, (r) => r.segmentName, (r) => r.netValue).forEach((d) => seg.addRow([d.name, inr2(d.value), d.count]));
   seg.columns.forEach((c) => { c.width = 28; });
   const buf = await wb.xlsx.writeBuffer();
   const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));

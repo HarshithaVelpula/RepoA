@@ -1,3 +1,4 @@
+import { fullInr, inr2 } from "@/lib/format";
 import { useMemo, useState } from "react";
 import { ChevronDown, ClipboardList, FileText, IndianRupee, Truck } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ComposedChart, LabelList, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -148,10 +149,10 @@ function DetailsTable({ rows }: { rows: PoRow[] }) {
     .sort((a, b) => b.poDate.localeCompare(a.poDate) || a.poNo.localeCompare(b.poNo)), [rows, s]);
   const pages = Math.max(1, Math.ceil(list.length / size));
   const p = Math.min(page, pages - 1);
-  const heads = ["PO Date", "PO No", "Item", "Delivery Date", "Days", "Document Type", "Vendor", "Plant", "SLoc", "Main Group", "Sub Group 1", "Sub Group 2", "Division", "Material", "Qty", "UOM", "Net Price", "Currency", "Net Order Val (Cr)"];
-  const numeric = new Set(["Days", "Qty", "Net Price", "Net Order Val (Cr)"]);
+  const heads = ["PO Date", "PO No", "Item", "Delivery Date", "Days", "Document Type", "Vendor", "Plant", "SLoc", "Main Group", "Sub Group 1", "Sub Group 2", "Division", "Material", "Qty", "UOM", "Net Price", "Currency", "Net Order Val (₹)"];
+  const numeric = new Set(["Days", "Qty", "Net Price", "Net Order Val (₹)"]);
   const t = poTotals(list);
-  const c2 = (v: number) => Math.round((v / CR) * 100) / 100;
+  const c2 = inr2;
   const typeLabel = (r: PoRow) => `${r.poTypeCode || "—"} – ${poGroup(r)}`;
   const excel = async () => {
     const { Workbook } = await import("exceljs");
@@ -181,10 +182,10 @@ function DetailsTable({ rows }: { rows: PoRow[] }) {
         {[r.sloc, r.mainGroup, r.sub1, r.sub2, r.division].map((v, i) => <td key={i} className="whitespace-nowrap px-2 py-1">{v}</td>)}
         <td className="min-w-48 px-2 py-1">{r.materialName}</td><td className="px-2 py-1 text-right tabular-nums">{num(r.qty)}</td><td className="px-2 py-1">{r.uom}</td>
         <td className="px-2 py-1 text-right tabular-nums">{num(r.netPrice)}</td><td className="px-2 py-1">{r.currency}</td>
-        <td className="px-2 py-1 text-right font-semibold tabular-nums">{cr(r.netValue)}</td></tr>)
+        <td className="px-2 py-1 text-right font-semibold tabular-nums">{fullInr(r.netValue)}</td></tr>)
         : <tr><td colSpan={heads.length} className="h-20 text-center text-muted-foreground">No purchase orders for these filters.</td></tr>}</tbody>
       {list.length > 0 && <tfoot><tr className="border-t-2 border-border bg-muted font-semibold"><td colSpan={18} className="px-2 py-1.5">Total INR ({list.length} lines)</td>
-        <td className="px-2 py-1.5 text-right tabular-nums">{cr(t.value)}</td></tr></tfoot>}
+        <td className="px-2 py-1.5 text-right tabular-nums">{fullInr(t.value)}</td></tr></tfoot>}
     </table></div>
     <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2 text-xs">
       <span>Rows</span><select value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(0); }} className="rounded border border-border bg-background px-1 py-0.5">{[10, 25, 50].map((n) => <option key={n}>{n}</option>)}</select>

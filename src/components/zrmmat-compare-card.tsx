@@ -1,3 +1,4 @@
+import { fullInr, inr2 } from "@/lib/format";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Check, ChevronsUpDown, Download, Eye } from "lucide-react";
@@ -63,11 +64,11 @@ export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected 
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet("ZKEYRM Compare");
     if (current) {
-      ws.addRow(["Month", "Quantity", "PO Val (₹ Cr)", `Unit Price (${U})`, `vs prev (${U})`, "vs prev (%)", `Diff from first (${U})`]);
-      series.forEach((p) => ws.addRow([ml(p.month), p.qty, p.valueInr / 1e7, p.price / D, p.mom == null ? null : p.mom / D, p.momPct, p.fromFirst == null ? null : p.fromFirst / D]));
+      ws.addRow(["Month", "Quantity", "PO Val (₹)", `Unit Price (${U})`, `vs prev (${U})`, "vs prev (%)", `Diff from first (${U})`]);
+      series.forEach((p) => ws.addRow([ml(p.month), p.qty, inr2(p.valueInr), p.price / D, p.mom == null ? null : p.mom / D, p.momPct, p.fromFirst == null ? null : p.fromFirst / D]));
     } else {
-      ws.addRow(["Material", "Description", "Quantity", "Value (₹ Cr)", `Unit Price (${U})`, `Latest MoM (${U})`, "Latest MoM (%)"]);
-      perMat.forEach((p) => ws.addRow([p.m.material, names.get(p.m.material) ?? "", p.s.qty, p.s.valueInr / 1e7, p.s.price / D, p.s.latestMom == null ? null : p.s.latestMom / D, p.s.latestMomPct]));
+      ws.addRow(["Material", "Description", "Quantity", "Value (₹)", `Unit Price (${U})`, `Latest MoM (${U})`, "Latest MoM (%)"]);
+      perMat.forEach((p) => ws.addRow([p.m.material, names.get(p.m.material) ?? "", p.s.qty, inr2(p.s.valueInr), p.s.price / D, p.s.latestMom == null ? null : p.s.latestMom / D, p.s.latestMomPct]));
     }
     const buf = await wb.xlsx.writeBuffer();
     const url = URL.createObjectURL(new Blob([buf])); const a = document.createElement("a");
@@ -131,17 +132,17 @@ export function ZrmmatCompareCard({ rows, emptyLabel = "no purchase in selected 
           </Line>
         </ComposedChart></ResponsiveContainer></div>
         <div className="max-h-60 overflow-auto"><table className="w-full text-[11px]">
-          <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["Month", "Qty", "PO Val (₹ Cr)", `Avg Price (${U})`, `vs prev month (${U})`, `Diff from first (${U})`, "Dtls"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
+          <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["Month", "Qty", "PO Val (₹)", `Avg Price (${U})`, `vs prev month (${U})`, `Diff from first (${U})`, "Dtls"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
           <tbody>{series.map((p) => <tr key={p.month} className="border-t border-border/60">
-            <td className="px-1.5 py-0.5">{ml(p.month)}</td><td className="px-1.5 tabular-nums">{n2(p.qty)}</td><td className="px-1.5 tabular-nums">{cr(p.valueInr)}</td><td className="px-1.5 tabular-nums">{pf(p.price)}</td>
+            <td className="px-1.5 py-0.5">{ml(p.month)}</td><td className="px-1.5 tabular-nums">{n2(p.qty)}</td><td className="px-1.5 tabular-nums">{fullInr(p.valueInr)}</td><td className="px-1.5 tabular-nums">{pf(p.price)}</td>
             <td className={`px-1.5 tabular-nums ${tone(p.mom)}`}>{ps(p.mom)}{p.momPct != null ? ` (${sign(p.momPct)}%)` : ""}</td><td className={`px-1.5 tabular-nums ${tone(p.fromFirst)}`}>{ps(p.fromFirst)}</td>
             <td className="px-1.5"><Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" title="View" aria-label="View" onClick={() => setDetailMonth(p.month)}><Eye className="size-3" /></Button></td>
           </tr>)}</tbody>
         </table>{!series.length ? <p className="p-3 text-xs text-muted-foreground">No purchases of this material in the selected period.</p> : null}</div>
       </div> : <div className="mt-2 max-h-72 overflow-auto"><table className="w-full text-[11px]">
-        <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["Material", "Description", "Qty", "Value (₹ Cr)", `Unit Price (${U})`, "Latest MoM"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
+        <thead className="text-on-radiant sticky top-0" style={{ background: "linear-gradient(90deg,#1f6fd1,#0f9d8a,#8e44ad)" }}><tr>{["Material", "Description", "Qty", "Value (₹)", `Unit Price (${U})`, "Latest MoM"].map((h) => <th key={h} className="px-1.5 py-1 text-left">{h}</th>)}</tr></thead>
         <tbody>{[...perMat].filter((p) => p.rs.length).sort((a, b) => b.s.valueInr - a.s.valueInr).map((p) => <tr key={p.m.material} onClick={() => setSel(p.m.material)} className="cursor-pointer border-t border-border/60 hover:bg-muted">
-          <td className="px-1.5 py-0.5 font-medium text-primary">{p.m.material}</td><td className="truncate px-1.5">{names.get(p.m.material)}</td><td className="px-1.5 tabular-nums">{n2(p.s.qty)} {p.s.unit}</td><td className="px-1.5 tabular-nums">{cr(p.s.valueInr)}</td><td className="px-1.5 tabular-nums">{pf(p.s.price)}</td>
+          <td className="px-1.5 py-0.5 font-medium text-primary">{p.m.material}</td><td className="truncate px-1.5">{names.get(p.m.material)}</td><td className="px-1.5 tabular-nums">{n2(p.s.qty)} {p.s.unit}</td><td className="px-1.5 tabular-nums">{fullInr(p.s.valueInr)}</td><td className="px-1.5 tabular-nums">{pf(p.s.price)}</td>
           <td className={`px-1.5 tabular-nums ${tone(p.s.latestMom)}`}>{ps(p.s.latestMom)}{p.s.latestMomPct != null ? ` (${sign(p.s.latestMomPct)}%)` : ""}</td>
         </tr>)}</tbody>
       </table></div>}
