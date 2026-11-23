@@ -61,9 +61,9 @@ export function mapCurrentStockPayload(payload: unknown, endpointName: string, n
     for (const k of CURRENT_STOCK_EXTRA_TEXT) row[k.toLowerCase()] = text(pick(raw, k));
     for (const k of CURRENT_STOCK_EXTRA_NUM) row[k.toLowerCase()] = orderBookNum(pick(raw, k));
     const n = (v: unknown) => Number(v) || 0;
-    if (!n(row.wlabs) && !n(row.winsm) && !n(row.wspem) && n(row.wbwbest)) {
-      row.wlabs = row.wbwbest;
-      if (!n(row.labst)) row.labst = row.mbwbest;
+    if (!n(row["wlabs"]) && !n(row["winsm"]) && !n(row["wspem"]) && n(row["wbwbest"])) {
+      row["wlabs"] = row["wbwbest"];
+      if (!n(row["labst"])) row["labst"] = row["mbwbest"];
     }
     byKey.set(`${matnr}|${werks}|${lgort}|${charg}`, row);
   }

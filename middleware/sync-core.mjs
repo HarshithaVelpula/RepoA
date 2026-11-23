@@ -1052,9 +1052,9 @@ function mapCurrentStockPayload(payload, endpointName, now = /* @__PURE__ */ new
     for (const k of CURRENT_STOCK_EXTRA_TEXT) row[k.toLowerCase()] = text8(pick10(raw, k));
     for (const k of CURRENT_STOCK_EXTRA_NUM) row[k.toLowerCase()] = orderBookNum(pick10(raw, k));
     const n = (v) => Number(v) || 0;
-    if (!n(row.wlabs) && !n(row.winsm) && !n(row.wspem) && n(row.wbwbest)) {
-      row.wlabs = row.wbwbest;
-      if (!n(row.labst)) row.labst = row.mbwbest;
+    if (!n(row["wlabs"]) && !n(row["winsm"]) && !n(row["wspem"]) && n(row["wbwbest"])) {
+      row["wlabs"] = row["wbwbest"];
+      if (!n(row["labst"])) row["labst"] = row["mbwbest"];
     }
     byKey.set(`${matnr}|${werks}|${lgort}|${charg}`, row);
   }
