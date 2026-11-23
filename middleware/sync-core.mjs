@@ -993,6 +993,21 @@ function mapDailyProductionPayload(payload, endpointName, now = /* @__PURE__ */ 
 // ../src/lib/current-stock-map.ts
 var CURRENT_STOCK_TEXT_FIELDS = ["LGOBE", "MAKTX", "MEINS", "MTART", "ROWNO", "SHELFNO", "RACKNO", "BINNO"];
 var CURRENT_STOCK_NUMERIC_FIELDS = ["LABST", "WLABS", "INSME", "WINSM", "SPEME", "WSPEM", "TRAME", "WTRAM"];
+var CURRENT_STOCK_EXTRA_TEXT = ["MATKL", "BKLAS", "BKBEZ", "VALCLASS_SN", "HWAER"];
+var CURRENT_STOCK_EXTRA_NUM = ["MBWBEST", "WBWBEST"];
+var NUM_ALIASES = {
+  LABST: ["UNRESTRICTED_QTY", "LABST"],
+  WLABS: ["UNRESTRICTED_VALUE", "WLABS"],
+  INSME: ["QC_QTY", "INSME"],
+  WINSM: ["QC_VALUE", "WINSM"],
+  SPEME: ["BLOCKED_QTY", "SPEME"],
+  WSPEM: ["BLOCKED_VALUE", "WSPEM"],
+  TRAME: ["TRAME"],
+  WTRAM: ["WTRAM"]
+};
+function trimMatnr(m) {
+  return /^\d+$/.test(m) ? m.replace(/^0+(?=\d)/, "") : m;
+}
 function isCurrentStockEndpoint(name) {
   const n = (name ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   return n.includes("currentstock") || n === "zcurrstk" || n.includes("zdprmisreport");
@@ -1021,7 +1036,8 @@ function mapCurrentStockPayload(payload, endpointName, now = /* @__PURE__ */ new
   const byKey = /* @__PURE__ */ new Map();
   let invalid = 0;
   for (const raw of source) {
-    const matnr = text8(pick10(raw, "MATNR"));
+    const m0 = text8(pick10(raw, "MATNR"));
+    const matnr = m0 ? trimMatnr(m0) : null;
     if (!matnr) {
       invalid++;
       continue;
@@ -1029,7 +1045,17 @@ function mapCurrentStockPayload(payload, endpointName, now = /* @__PURE__ */ new
     const werks = text8(pick10(raw, "WERKS")) ?? "", lgort = text8(pick10(raw, "LGORT")) ?? "", charg = text8(pick10(raw, "CHARG")) ?? "";
     const row = { matnr, werks, lgort, charg, raw, source_endpoint: endpointName, synced_at: syncedAt };
     for (const k of CURRENT_STOCK_TEXT_FIELDS) row[k.toLowerCase()] = text8(pick10(raw, k));
-    for (const k of CURRENT_STOCK_NUMERIC_FIELDS) row[k.toLowerCase()] = orderBookNum(pick10(raw, k));
+    for (const k of CURRENT_STOCK_NUMERIC_FIELDS) {
+      const key = (NUM_ALIASES[k] ?? [k]).find((a) => pick10(raw, a) !== void 0 && pick10(raw, a) !== null && pick10(raw, a) !== "");
+      row[k.toLowerCase()] = key ? orderBookNum(pick10(raw, key)) : null;
+    }
+    for (const k of CURRENT_STOCK_EXTRA_TEXT) row[k.toLowerCase()] = text8(pick10(raw, k));
+    for (const k of CURRENT_STOCK_EXTRA_NUM) row[k.toLowerCase()] = orderBookNum(pick10(raw, k));
+    const n = (v) => Number(v) || 0;
+    if (!n(row.wlabs) && !n(row.winsm) && !n(row.wspem) && n(row.wbwbest)) {
+      row.wlabs = row.wbwbest;
+      if (!n(row.labst)) row.labst = row.mbwbest;
+    }
     byKey.set(`${matnr}|${werks}|${lgort}|${charg}`, row);
   }
   const rows = [...byKey.values()];

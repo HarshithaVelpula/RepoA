@@ -67,4 +67,4 @@ export async function getCurrentStock(): Promise<{ rows: CurrentStockRow[]; samp
   for (const r of out) { const s = String((r as Record<string, unknown>)["synced_at"] ?? ""); if (s > syncedAt) syncedAt = s; }
   return { rows: out.map(toCurrentStockRow), sample: false, syncedAt: syncedAt || null };
 }
-export const currentStockQuery = queryOptions({ queryKey: ["current-stock", "v1"], queryFn: getCurrentStock, staleTime: Infinity, refetchOnWindowFocus: false });
+export const currentStockQuery = queryOptions({ queryKey: ["current-stock", "v2"], queryFn: getCurrentStock, staleTime: Infinity, refetchOnWindowFocus: false });

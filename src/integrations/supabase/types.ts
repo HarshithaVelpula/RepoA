@@ -32,14 +32,19 @@ export type Database = {
       current_stock: {
         Row: {
           binno: string | null
+          bkbez: string | null
+          bklas: string | null
           charg: string
+          hwaer: string | null
           id: string
           insme: number | null
           labst: number | null
           lgobe: string | null
           lgort: string
           maktx: string | null
+          matkl: string | null
           matnr: string
+          mbwbest: number | null
           meins: string | null
           mtart: string | null
           rackno: string | null
@@ -50,6 +55,8 @@ export type Database = {
           speme: number | null
           synced_at: string
           trame: number | null
+          valclass_sn: string | null
+          wbwbest: number | null
           werks: string
           winsm: number | null
           wlabs: number | null
@@ -58,14 +65,19 @@ export type Database = {
         }
         Insert: {
           binno?: string | null
+          bkbez?: string | null
+          bklas?: string | null
           charg?: string
+          hwaer?: string | null
           id?: string
           insme?: number | null
           labst?: number | null
           lgobe?: string | null
           lgort?: string
           maktx?: string | null
+          matkl?: string | null
           matnr: string
+          mbwbest?: number | null
           meins?: string | null
           mtart?: string | null
           rackno?: string | null
@@ -76,6 +88,8 @@ export type Database = {
           speme?: number | null
           synced_at?: string
           trame?: number | null
+          valclass_sn?: string | null
+          wbwbest?: number | null
           werks?: string
           winsm?: number | null
           wlabs?: number | null
@@ -84,14 +98,19 @@ export type Database = {
         }
         Update: {
           binno?: string | null
+          bkbez?: string | null
+          bklas?: string | null
           charg?: string
+          hwaer?: string | null
           id?: string
           insme?: number | null
           labst?: number | null
           lgobe?: string | null
           lgort?: string
           maktx?: string | null
+          matkl?: string | null
           matnr?: string
+          mbwbest?: number | null
           meins?: string | null
           mtart?: string | null
           rackno?: string | null
@@ -102,6 +121,8 @@ export type Database = {
           speme?: number | null
           synced_at?: string
           trame?: number | null
+          valclass_sn?: string | null
+          wbwbest?: number | null
           werks?: string
           winsm?: number | null
           wlabs?: number | null
