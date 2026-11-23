@@ -66,7 +66,7 @@ function RankList({ data }: { data: { name: string; value: number }[] }) {
       <b className="text-right text-foreground">{cr(d.value).toFixed(2)}</b></li>)}</ul></div>;
 }
 
-function Donut({ data, total, showPercent = true, size = 140 }: { data: { name: string; value: number }[]; total: number; showPercent?: boolean; size?: number }) {
+function Donut({ data, total, showPercent = true, showBoth = false, size = 140 }: { data: { name: string; value: number }[]; total: number; showPercent?: boolean; showBoth?: boolean; size?: number }) {
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
   if (!data.length) return <Empty />;
   return <div className="grid items-center gap-2" style={{ gridTemplateColumns: `minmax(0,${size}px) minmax(0,1fr)` }}>
@@ -74,7 +74,7 @@ function Donut({ data, total, showPercent = true, size = 140 }: { data: { name: 
       <Pie data={data} dataKey="value" nameKey="name" innerRadius="62%" outerRadius="92%" paddingAngle={1} label={false} labelLine={false}>{data.map((_, i) => <Cell key={i} fill={`url(#${id}-${i % COLORS.length})`} />)}</Pie>
       <Tooltip formatter={(v: number) => `₹ ${cr(v)} Cr`} /></PieChart></ResponsiveContainer>
       <div className="pointer-events-none absolute inset-0 grid place-items-center text-center text-[10px] font-bold leading-tight text-foreground"><div>₹ {cr(total)} Cr<br /><span className="text-[8px] font-normal text-muted-foreground">Total Sales</span></div></div></div>
-    <ul className="max-h-[140px] min-w-0 space-y-1 overflow-auto text-[10px]">{data.map((d, i) => <li key={d.name} className="flex min-w-0 items-center gap-1" title={d.name}><span className="size-2 shrink-0 rounded-full" style={{ background: COLORS[i % COLORS.length] }} /><span className="truncate">{d.name}</span> <b className="ml-auto shrink-0 pl-2">{showPercent ? `${total ? ((d.value / total) * 100).toFixed(1) : 0}%` : `₹ ${cr(d.value)}`}</b></li>)}</ul>
+    <ul className="max-h-[140px] min-w-0 space-y-1 overflow-auto text-[10px]">{data.map((d, i) => <li key={d.name} className="flex min-w-0 items-center gap-1" title={d.name}><span className="size-2 shrink-0 rounded-full" style={{ background: COLORS[i % COLORS.length] }} /><span className="truncate">{d.name}</span> <b className="ml-auto shrink-0 pl-2">{showBoth ? `₹ ${cr(d.value)} Cr · ${total ? ((d.value / total) * 100).toFixed(1) : 0}%` : showPercent ? `${total ? ((d.value / total) * 100).toFixed(1) : 0}%` : `₹ ${cr(d.value)}`}</b></li>)}</ul>
   </div>;
 }
 
@@ -108,7 +108,7 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
       <Tile icon={<Receipt className="size-5" />} label="LAH" value={has ? Math.round(toLah(a.totalAh)).toLocaleString("en-IN") : "—"} tone="var(--chart-3)" />
     </div>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Card title="Distribution Channel"><Donut data={a.byChannel} total={a.totalInvoice} /></Card>
+      <Card title="Distribution Channel"><Donut data={a.byChannel} total={a.totalInvoice} showBoth /></Card>
       <Card title="Top 10 Customers"><RankList data={a.topCustomers} /></Card>
       <Card title="Top 10 Profit Centres"><RankList data={a.topProfitCenters} /></Card>
       <Card title="Top 10 Materials"><RankList data={a.topMaterials} /></Card>

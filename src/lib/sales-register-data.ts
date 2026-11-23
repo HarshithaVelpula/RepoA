@@ -14,7 +14,7 @@ export function toSalesRegisterRow(r: Rec): SalesRegisterRow {
     customer: t(r.kunag), customerName: t(r.name_c) || t(r.kunag),
     plant: t(r.werks), profitCenter: t(r.prctr),
     mainGroup: t(r.mngrp1) || t(r.main_grp) || t(r.main_group), subGroup: t(r.pcgrp1) || t(r.sub_grp) || t(r.sub_group), subGroup2: t(r.pcgrp2), subGroup3: t(r.pcgrp3),
-    productCategory: t(r.div_name), channel: t(r.vtext_dc), channelCode: t(r.auart) || t(r.vtweg_auft),
+    productCategory: t(r.div_name), channel: t(r.vtext_dc), channelCode: t(r.vtweg_auft) || t(r.auart),
     division: t(r.spart), billingType: t(r.fkart), salesDocument: t(r.aubel), salesDocumentItem: t(r.aupos),
     salesOffice: t(r.bezei_so), materialCode: t(r.matnr), material: t(r.arktx) || t(r.matnr),
     model: t(r.model), productType: t(r.type), industry: t(r.brtxt), segmentCode: t(r.kdgrp), segmentName: t(r.kdgrp_desp), salesMan: t(r.sales_man),

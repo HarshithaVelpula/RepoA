@@ -17,7 +17,7 @@ type Summary = ReturnType<typeof summarizeLaunchOrders>;
 
 async function fetchOrderBookRows() {
   const pageSize = 1_000;
-  const allRows: { netwr: number | string | null; vtext_dc: string | null; auart: string | null; plant: string | null; profit_center: string | null; created_date: string | null }[] = [];
+  const allRows: { netwr: number | string | null; vtext_dc: string | null; vtweg_auft: string | null; auart: string | null; plant: string | null; profit_center: string | null; created_date: string | null }[] = [];
   for (let page = 0; ; page += 1) {
     const result = await supabase.from("order_book").select("netwr,vtext_dc,auart,plant,profit_center,created_date")
       .order("id", { ascending: true }).range(page * pageSize, (page + 1) * pageSize - 1);
@@ -38,7 +38,7 @@ export function OrderBookLaunchCard({ fallback }: { fallback: React.ReactNode })
   const access = useUserAccess();
   const period = useMemo(() => currentReportPeriod(), []);
   const data = useMemo(() => rows ? summarizeLaunchOrders(scopeRowsToAssigned(rows.filter((r) => inReportPeriod(r.created_date, period)), access, { plant: (r) => r.plant, profitCentre: (r) => r.profit_center })
-    .map((r) => ({ p_value1: r.netwr, sales_type: r.vtext_dc, order_type: r.auart })), { byCode: true, all: true }) : undefined, [rows, access, period]);
+    .map((r) => ({ p_value1: r.netwr, sales_type: r.vtweg_auft && r.vtext_dc ? `${r.vtweg_auft} — ${r.vtext_dc}` : r.vtext_dc, order_type: r.vtweg_auft || r.auart })), { byCode: true, all: true }) : undefined, [rows, access, period]);
   const { data: lastSynced } = useReportSync("order-book");
   if (isLoading) return <div className="h-[188px] w-full animate-pulse rounded-2xl border border-border bg-launchpad-tile" />;
   if (!data) return <>{fallback}</>;
@@ -47,7 +47,7 @@ export function OrderBookLaunchCard({ fallback }: { fallback: React.ReactNode })
 
 async function fetchSitRows() {
   const pageSize = 1_000;
-  const allRows: { vbeln: string | null; netwr_tot: number | string | null; vtext_dc: string | null; auart: string | null; werks: string | null; prctr: string | null; fkdat: string | null }[] = [];
+  const allRows: { vbeln: string | null; netwr_tot: number | string | null; vtext_dc: string | null; vtweg_auft: string | null; auart: string | null; werks: string | null; prctr: string | null; fkdat: string | null }[] = [];
   for (let page = 0; ; page += 1) {
     const result = await supabase.from("sales_in_transit").select("vbeln,netwr_tot,vtext_dc,auart,werks,prctr,fkdat")
       .order("id", { ascending: true }).range(page * pageSize, (page + 1) * pageSize - 1);
@@ -91,9 +91,9 @@ export function SitLaunchCard({ fallback }: { fallback: React.ReactNode }) {
 }
 
 async function fetchSalesRegisterRows() {
-  const allRows: { netwr_ex: number | string | null; vtext_dc: string | null; auart: string | null; werks: string | null; prctr: string | null }[] = [];
+  const allRows: { netwr_ex: number | string | null; vtext_dc: string | null; vtweg_auft: string | null; auart: string | null; werks: string | null; prctr: string | null }[] = [];
   for (let page = 0; ; page += 1) {
-    const result = await supabase.from("sales_register").select("netwr_ex,vtext_dc,auart,werks,prctr")
+    const result = await supabase.from("sales_register").select("netwr_ex,vtext_dc,vtweg_auft,auart,werks,prctr")
       .order("id", { ascending: true }).range(page * 1000, (page + 1) * 1000 - 1);
     if (result.error) throw result.error;
     const rows = result.data ?? [];
@@ -105,13 +105,13 @@ async function fetchSalesRegisterRows() {
 
 export function SalesRegisterLaunchCard({ fallback }: { fallback: React.ReactNode }) {
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["sales-register-launch-summary", "netwr-ex-auart-v1"],
+    queryKey: ["sales-register-launch-summary", "netwr-ex-channel-v2"],
     queryFn: fetchSalesRegisterRows,
     staleTime: Infinity, gcTime: Infinity, refetchOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false,
   });
   const access = useUserAccess();
   const data = useMemo(() => rows ? summarizeLaunchOrders(scopeRowsToAssigned(rows, access, { plant: (r) => r.werks, profitCentre: (r) => r.prctr })
-    .map((r) => ({ p_value1: r.netwr_ex, sales_type: r.vtext_dc, order_type: r.auart })), { all: true }) : undefined, [rows, access]);
+    .map((r) => ({ p_value1: r.netwr_ex, sales_type: r.vtweg_auft && r.vtext_dc ? `${r.vtweg_auft} — ${r.vtext_dc}` : r.vtext_dc, order_type: r.vtweg_auft || r.auart })), { all: true }) : undefined, [rows, access]);
   const { data: lastSynced } = useReportSync("sales-register");
   if (isLoading) return <div className="h-[188px] w-full animate-pulse rounded-2xl border border-border bg-launchpad-tile" />;
   if (!data || !rows?.length) return <>{fallback}</>;
