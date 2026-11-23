@@ -76,7 +76,6 @@ export function CurrentStockDashboard({ rows, sample = false }: { rows: CurrentS
   const mtypes = groupValue(data, (r) => r.mtype, invV);
   const cats = [{ name: "Unrestricted", value: t.unrV }, { name: "Stk in QC", value: t.qcV }, { name: "Blocked", value: t.blkV }].filter((c) => c.value > 0);
   const plants = groupValue(data, (r) => r.plant, invV).slice(0, 15).map((d) => ({ ...d, value: d.value / CR }));
-  const slocs = groupValue(data.filter((r) => r.sloc.trim()), (r) => `${r.sloc} ${r.slocDesc}`, invV).slice(0, 10);
   const mats = groupValue(data.filter((r) => r.matDesc.trim()), (r) => r.matDesc, invV).slice(0, 10);
   const unrTop = topVQ(data, (r) => r.unrV, (r) => r.unrQ);
   const qcTop = topVQ(data, (r) => r.qcV, (r) => r.qcQ);
@@ -98,7 +97,7 @@ export function CurrentStockDashboard({ rows, sample = false }: { rows: CurrentS
   return <div className="space-y-3">
     <div data-pdf-exclude className="rounded-xl border border-border shadow-sm" style={TINTS.neutral}>
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center justify-between px-3 py-1.5 text-xs font-semibold text-card-foreground"><span>Filters</span><ChevronDown className={`size-4 transition-transform ${open ? "" : "-rotate-90"}`} /></button>
-      {open ? <div className="grid grid-cols-2 gap-2 px-3 pb-2 sm:grid-cols-3 lg:grid-cols-5">{field("plant", "Plant", opts.plant)}{field("sloc", "Storage Location", opts.sloc)}{field("mtype", "Material Type", opts.mtype)}{field("material", "Material", opts.material)}
+      {open ? <div className="grid grid-cols-2 gap-2 px-3 pb-2 sm:grid-cols-3 lg:grid-cols-4">{field("plant", "Plant", opts.plant)}{field("mtype", "Material Type", opts.mtype)}{field("material", "Material", opts.material)}
         <div className="flex items-end"><Button type="button" variant="reset" size="sm" className="h-8 w-full text-xs" onClick={() => { setF(EMPTY); setPage(0); }}>Reset</Button></div></div> : null}
     </div>
     <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -111,11 +110,10 @@ export function CurrentStockDashboard({ rows, sample = false }: { rows: CurrentS
         <p className="flex items-center gap-1 text-[10px] font-semibold opacity-95"><Icon className="size-3 shrink-0" />{label}</p>
         <p title={value} className="mt-1 truncate text-sm font-bold tabular-nums leading-tight sm:text-base">{value}</p></div>)}
     </div>
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
       <Card title="Value by Mat Type" tint="sky"><Donut data={mtypes.map((c) => ({ ...c, value: c.value }))} heads={["Mat Type", "Val", "%"]} /></Card>
       <Card title="Stock Status" tint="peach"><Donut data={cats.map((c) => ({ ...c, value: c.value }))} heads={["Status", "Val", "%"]} /></Card>
       <Card title="Top 10 Materials" tint="steel"><Bars data={mats} /></Card>
-      <Card title="Top Storage Locations" tint="rose"><Bars data={slocs} /></Card>
     </div>
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       <Card title="Top 10 Unrestricted" sub="Val in Cr" tint="teal"><VQBars data={unrTop} /></Card>
