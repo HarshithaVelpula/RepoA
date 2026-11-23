@@ -97,7 +97,7 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
   const has = rows.length > 0;
   const sum = (k: "billedQty" | "netValue" | "invoiceValue" | "cgst" | "sgst" | "igst") => filtered.reduce((s, r) => s + r[k], 0);
   const channels = [...new Set(rows.map((r) => r.channelCode || r.channel))];
-  const heads = ["#", "Bill. Date", "Bill. Doc. No", "Invoice No", "Customer Name", "Industry Name", "Segment", "Distribution Channel", "Plant", "Profit Center", "Main Group / Sub Group", "Material Description", "Billed Qty (LAH)", "Net Value (₹)", "CGST (LAH)", "SGST (LAH)", "IGST (LAH)", "Posting Status"];
+  const heads = ["#", "Bill. Date", "Bill. Doc. No", "Invoice No", "Customer Name", "Industry Name", "Segment", "Distribution Channel", "Plant", "Profit Center", "Main Group / Sub Group", "Material Description", "Billed Qty", "Net Value (₹)", "CGST (₹)", "SGST (₹)", "IGST (₹)", "Posting Status"];
   const R = "text-right tabular-nums whitespace-nowrap";
 
   return <div className="space-y-3">
@@ -163,21 +163,21 @@ export function SalesRegisterDashboard({ rows: rawRows = [], range }: { rows?: S
             <TableCell className="whitespace-nowrap">{r.profitCenter}</TableCell>
             <TableCell className="whitespace-nowrap">{`${r.mainGroup} / ${r.subGroup}`}</TableCell>
             <TableCell className="min-w-56">{r.material}</TableCell>
-            <TableCell className={R}>{toLah(r.billedQty).toFixed(2)}</TableCell>
+            <TableCell className={R}>{(r.billedQty).toLocaleString("en-IN", { maximumFractionDigits: 3 })}</TableCell>
             <TableCell className={R}>{fullInr(r.netValue)}</TableCell>
-                        <TableCell className={R}>{toLah(r.cgst).toFixed(2)}</TableCell>
-            <TableCell className={R}>{toLah(r.sgst).toFixed(2)}</TableCell>
-            <TableCell className={R}>{toLah(r.igst).toFixed(2)}</TableCell>
+                        <TableCell className={R}>{fullInr(r.cgst)}</TableCell>
+            <TableCell className={R}>{fullInr(r.sgst)}</TableCell>
+            <TableCell className={R}>{fullInr(r.igst)}</TableCell>
             <TableCell><span className={`rounded px-2 py-0.5 ${r.status === "Posted" ? "bg-chart-2/15 font-semibold text-chart-2" : "bg-chart-4/20 font-semibold text-foreground"}`}>{r.status}</span></TableCell>
           </TableRow>;
         }) : <TableRow><TableCell colSpan={heads.length} className="h-24 text-center text-muted-foreground">No Sales Register data for these filters yet — run Sync in SAP API Settings.</TableCell></TableRow>}</TableBody>
         {filtered.length > 0 && <TableFooter><TableRow className="border-t-2 border-border bg-muted text-[11px] font-semibold">
           <TableCell colSpan={12}>Total ({filtered.length} lines)</TableCell>
-          <TableCell className={R}>{toLah(sum("billedQty")).toFixed(2)}</TableCell>
+          <TableCell className={R}>{(sum("billedQty")).toLocaleString("en-IN", { maximumFractionDigits: 3 })}</TableCell>
           <TableCell className={R}>{fullInr(sum("netValue"))}</TableCell>
-                    <TableCell className={R}>{toLah(sum("cgst")).toFixed(2)}</TableCell>
-          <TableCell className={R}>{toLah(sum("sgst")).toFixed(2)}</TableCell>
-          <TableCell className={R}>{toLah(sum("igst")).toFixed(2)}</TableCell>
+                    <TableCell className={R}>{fullInr(sum("cgst"))}</TableCell>
+          <TableCell className={R}>{fullInr(sum("sgst"))}</TableCell>
+          <TableCell className={R}>{fullInr(sum("igst"))}</TableCell>
           <TableCell />
         </TableRow></TableFooter>}
       </Table>
