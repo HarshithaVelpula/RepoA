@@ -1,0 +1,580 @@
+/**
+ * On-prem scheduler for the MIS portal.
+ *
+ * The self-hosted portal is a static SPA behind Nginx, so there is no always
+ * running app server to receive a database timer. This module gives the
+ * middleware (which does run 24/7 under PM2) its own scheduler.
+ *
+ * Everything it does is driven by what is saved in the portal screens:
+ * endpoint path, method, payload, SAP system/client, active flag, the
+ * "Enable scheduled sync" switch and the cron expression are all re-read from
+ * the database on every tick. Nothing about the schedule is fixed in code.
+ */
+import { createClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
+import {
+  mapPayload,
+  mapOpenSalesOrdersPayload,
+  extractEmbeddedBody,
+  salvageTruncatedArray,
+  withEndpointDates,
+  isOpenSalesOrdersEndpoint,
+  mapZcashFlowPayload,
+  isZcashFlowEndpoint,
+  mapUserDropdownPayload,
+  isUserDropdownEndpoint,
+  mapOrderBookPayload,
+  isOrderBookEndpoint,
+  mapSitPayload,
+  isSitEndpoint,
+  mapSalesRegisterPayload,
+  isSalesRegisterEndpoint,
+  mapPurchaseRegisterPayload,
+  isPurchaseRegisterEndpoint,
+  mapOpenPoPayload,
+  isOpenPoEndpoint,
+  mapCurrentStockPayload,
+  isCurrentStockEndpoint,
+  isDailyProductionEndpoint,
+  mapDailyProductionPayload,
+  mapPurchaseOrdersPayload,
+  isPurchaseOrdersEndpoint,
+  keyValueObject,
+  formatBytes,
+} from "./sync-core.mjs";
+
+const BATCH = 500;
+const PROGRESS_EVERY = 5000;
+const RUN_HISTORY_LIMIT = 6;
+/** A run older than this is treated as dead, so a crash cannot block forever. */
+const STALE_RUN_MS = 30 * 60 * 1000;
+
+/* ------------------------------ cron matching ----------------------------- */
+
+/** Matches one cron field (`*`, `5`, `1-5`, `*\/10`, `1,3,5`) against a value. */
+function fieldMatches(field, value) {
+  return String(field)
+    .split(",")
+    .some((part) => {
+      const [rangePart, stepPart] = part.split("/");
+      const step = stepPart ? Number(stepPart) : 1;
+      if (!Number.isFinite(step) || step < 1) return false;
+      if (rangePart === "*" || rangePart === "") return value % step === 0;
+      const [fromRaw, toRaw] = rangePart.split("-");
+      const from = Number(fromRaw);
+      const to = toRaw === undefined ? from : Number(toRaw);
+      if (!Number.isFinite(from) || !Number.isFinite(to)) return false;
+      if (value < Math.min(from, to) || value > Math.max(from, to)) return false;
+      return (value - Math.min(from, to)) % step === 0;
+    });
+}
+
+/** True when a 5-field cron expression is due at the given local time. */
+export function cronMatches(expression, date = new Date()) {
+  const fields = String(expression || "")
+    .trim()
+    .split(/\s+/);
+  if (fields.length !== 5) return false;
+  const [min, hour, dom, mon, dow] = fields;
+  const weekday = date.getDay();
+  return (
+    fieldMatches(min, date.getMinutes()) &&
+    fieldMatches(hour, date.getHours()) &&
+    fieldMatches(dom, date.getDate()) &&
+    fieldMatches(mon, date.getMonth() + 1) &&
+    (fieldMatches(dow, weekday) || (weekday === 0 && fieldMatches(dow, 7)))
+  );
+}
+
+/** Match the UI's `IST:HH:mm,HH:mm` daily schedule independently of server timezone. */
+export function dailyIstScheduleMatches(expression, date = new Date()) {
+  const text = String(expression || "").trim();
+  if (!text.startsWith("IST:")) return false;
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+  return text
+    .slice(4)
+    .split(",")
+    .map((value) => value.trim())
+    .includes(time);
+}
+
+export function scheduleMatches(expression, date = new Date()) {
+  return String(expression || "").trim().startsWith("IST:")
+    ? dailyIstScheduleMatches(expression, date)
+    : cronMatches(expression, date);
+}
+
+/* --------------------------------- helpers -------------------------------- */
+
+function minuteKey(date) {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}-${date.getMinutes()}`;
+}
+
+/* -------------------------------- scheduler ------------------------------- */
+
+export function createScheduler({ callSap, resolveSystem, logLine, newTraceId }) {
+  const url = (process.env.SUPABASE_URL || "").trim().replace(/\/+$/, "");
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+  const enabled = Boolean(url && key);
+  const db = enabled
+    ? createClient(url, key, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        // Node.js 20 has no native WebSocket; the scheduler does not use
+        // Realtime, but supabase-js still probes for a WebSocket at startup.
+        realtime: { transport: WebSocket },
+      })
+    : null;
+
+  /** Endpoint names currently being synced by this process. */
+  const inFlight = new Set();
+  /** Last minute an endpoint was fired, so one tick cannot double-fire it. */
+  const lastFired = new Map();
+
+  async function pruneRuns(endpoint) {
+    try {
+      const { data } = await db
+        .from("sap_sync_runs")
+        .select("id")
+        .eq("endpoint", endpoint)
+        .order("started_at", { ascending: false })
+        .range(RUN_HISTORY_LIMIT, RUN_HISTORY_LIMIT + 500);
+      const stale = (data ?? []).map((r) => r.id);
+      if (stale.length) await db.from("sap_sync_runs").delete().in("id", stale);
+    } catch {
+      /* history pruning must never break a sync */
+    }
+  }
+
+  async function startRun(endpoint, snapshot) {
+    const { data } = await db
+      .from("sap_sync_runs")
+      .insert({
+        endpoint,
+        status: "running",
+        started_at: new Date().toISOString(),
+        request_snapshot: snapshot ?? null,
+      })
+      .select("id")
+      .single();
+    return data?.id ?? null;
+  }
+
+  async function finishRun(runId, endpoint, patch) {
+    if (runId) {
+      await db
+        .from("sap_sync_runs")
+        .update({ finished_at: new Date().toISOString(), ...patch })
+        .eq("id", runId);
+    }
+    await db
+      .from("sap_endpoints")
+      .update({
+        last_run_at: new Date().toISOString(),
+        last_run_status: patch.status === "success" ? "success" : patch.status,
+      })
+      .eq("name", endpoint);
+    await pruneRuns(endpoint);
+  }
+
+  /** True when another run for this endpoint is still marked running. */
+  async function runInProgress(endpoint) {
+    const since = new Date(Date.now() - STALE_RUN_MS).toISOString();
+    const { data } = await db
+      .from("sap_sync_runs")
+      .select("id")
+      .eq("endpoint", endpoint)
+      .eq("status", "running")
+      .gte("started_at", since)
+      .limit(1);
+    return (data ?? []).length > 0;
+  }
+
+  /** Maps the SAP payload and writes it to zfisales_detail. */
+  async function storeRows(payload, endpoint, requestSnapshot) {
+    if (isPurchaseOrdersEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapPurchaseOrdersPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("purchase_orders").upsert(rows.slice(i, i + BATCH), { onConflict: "po,po_item" });
+        if (error) throw new Error(error.message);
+      }
+      let removed = 0;
+      const dates = rows.map((r) => r.po_date).filter(Boolean).sort();
+      if (rows.length && dates.length) {
+        const { count, error } = await db.from("purchase_orders").delete({ count: "exact" })
+          .gte("po_date", dates[0]).lte("po_date", dates[dates.length - 1]).lt("synced_at", rows[0].synced_at);
+        if (error) throw new Error(error.message);
+        removed = count ?? 0;
+      }
+      return { received, stored: rows.length, replaced: removed, skipped: 0, invalid, duplicates, syncScopeKey: "purchase_orders", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isDailyProductionEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapDailyProductionPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("daily_production").upsert(rows.slice(i, i + BATCH), { onConflict: "mblnr,mjahr,zeile" });
+        if (error) throw new Error(error.message);
+      }
+      let removed = 0;
+      const dates = rows.map((r) => r.budat).filter(Boolean).sort();
+      if (rows.length && dates.length) {
+        const { count, error } = await db.from("daily_production").delete({ count: "exact" })
+          .gte("budat", dates[0]).lte("budat", dates[dates.length - 1]).lt("synced_at", rows[0].synced_at);
+        if (error) throw new Error(error.message);
+        removed = count ?? 0;
+      }
+      return { received, stored: rows.length, replaced: removed, skipped: 0, invalid, duplicates, syncScopeKey: "daily_production", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isCurrentStockEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapCurrentStockPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("current_stock").upsert(rows.slice(i, i + BATCH), { onConflict: "matnr,werks,lgort,charg" });
+        if (error) throw new Error(error.message);
+      }
+      let removed = 0;
+      if (rows.length) {
+        const { count, error } = await db.from("current_stock").delete({ count: "exact" }).lt("synced_at", rows[0].synced_at);
+        if (error) throw new Error(error.message);
+        removed = count ?? 0;
+      }
+      return { received, stored: rows.length, replaced: removed, skipped: 0, invalid, duplicates, syncScopeKey: "current_stock", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isOpenPoEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapOpenPoPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("open_purchase_order").upsert(rows.slice(i, i + BATCH), { onConflict: "ebeln,ebelp" });
+        if (error) throw new Error(error.message);
+      }
+      let removed = 0;
+      const dates = rows.map((r) => r.bedat).filter(Boolean).sort();
+      if (rows.length && dates.length) {
+        const { count, error } = await db.from("open_purchase_order").delete({ count: "exact" })
+          .gte("bedat", dates[0]).lte("bedat", dates[dates.length - 1]).lt("synced_at", rows[0].synced_at);
+        if (error) throw new Error(error.message);
+        removed = count ?? 0;
+      }
+      return { received, stored: rows.length, replaced: removed, skipped: 0, invalid, duplicates, syncScopeKey: "open_purchase_order", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isPurchaseRegisterEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapPurchaseRegisterPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("purchase_register").upsert(rows.slice(i, i + BATCH), { onConflict: "belnr,buzei,mblnr,zeile" });
+        if (error) throw new Error(error.message);
+      }
+      return { received, stored: rows.length, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "purchase_register", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isSalesRegisterEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapSalesRegisterPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("sales_register").upsert(rows.slice(i, i + BATCH), { onConflict: "vbeln,posnr" });
+        if (error) throw new Error(error.message);
+      }
+      return { received, stored: rows.length, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "sales_register", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isSitEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapSitPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("sales_in_transit").upsert(rows.slice(i, i + BATCH), { onConflict: "vbeln,posnr" });
+        if (error) throw new Error(error.message);
+      }
+      // SAP returns the full current in-transit set: remove lines absent from this successful reply.
+      const existing = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await db.from("sales_in_transit").select("vbeln,posnr").range(from, from + 999);
+        if (error) throw new Error(error.message);
+        existing.push(...(data ?? []));
+        if (!data || data.length < 1000) break;
+      }
+      const keep = new Set(rows.map((r) => `${r.vbeln}|${r.posnr}`));
+      const stale = existing.filter((r) => !keep.has(`${r.vbeln}|${r.posnr}`));
+      const byVbeln = new Map();
+      for (const r of stale) byVbeln.set(r.vbeln, [...(byVbeln.get(r.vbeln) ?? []), r.posnr]);
+      for (const [vbeln, posnrs] of byVbeln) {
+        const { error } = await db.from("sales_in_transit").delete().eq("vbeln", vbeln).in("posnr", posnrs);
+        if (error) throw new Error(error.message);
+      }
+      console.log(`[SIT] ${rows.length} added or updated, ${stale.length} removed`);
+      return { received, stored: rows.length, replaced: stale.length, skipped: 0, invalid, duplicates, syncScopeKey: "sales_in_transit", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isOrderBookEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapOrderBookPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("order_book").upsert(rows.slice(i, i + BATCH), { onConflict: "sales_order,sales_order_item" });
+        if (error) throw new Error(error.message);
+      }
+      return { received, stored: rows.length, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "order_book", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isUserDropdownEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapUserDropdownPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("sap_user_dropdown_masters").upsert(rows.slice(i, i + BATCH), { onConflict: "category,code" });
+        if (error) throw new Error(error.message);
+      }
+      return { received, stored: rows.length, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "sap_user_dropdown_masters", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isZcashFlowEndpoint(endpoint)) {
+      const { received, rows, invalid, duplicates } = mapZcashFlowPayload(payload, endpoint);
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("zcash_flow").upsert(rows.slice(i, i + BATCH), { onConflict: "profit_center,plant,gl_code" });
+        if (error) throw new Error(error.message);
+      }
+      return { received, stored: rows.length, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "zcash_flow", snapshotId: null, postingFrom: null, postingTo: null };
+    }
+    if (isOpenSalesOrdersEndpoint(endpoint)) {
+      const mapped = mapOpenSalesOrdersPayload(payload, endpoint, requestSnapshot);
+      const { received, rows, skipped, invalid, duplicates, syncScopeKey, snapshotId } = mapped;
+      if (!rows.length) return { received, stored: 0, replaced: 0, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingFrom: null, postingTo: null };
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { error } = await db.from("open_sales_orders").insert(rows.slice(i, i + BATCH));
+        if (error) throw new Error(error.message);
+      }
+      const { data: replaced, error } = await db.rpc("activate_open_sales_orders_snapshot", {
+        _scope_key: syncScopeKey, _snapshot_id: snapshotId, _expected_count: rows.length,
+      });
+      if (error) {
+        await db.from("open_sales_orders").delete().eq("snapshot_id", snapshotId).eq("is_active_snapshot", false);
+        throw new Error(error.message);
+      }
+      return { received, stored: rows.length, replaced: replaced ?? 0, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingFrom: null, postingTo: null };
+    }
+    const { received, rows, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingRange } = mapPayload(
+      payload,
+      endpoint,
+      requestSnapshot,
+    );
+    if (!rows.length || !postingRange) {
+      return { received, stored: 0, replaced: 0, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingFrom: null, postingTo: null };
+    }
+
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db
+        .from("zfisales_detail")
+        .insert(rows.slice(i, i + BATCH));
+      if (error) throw new Error(error.message);
+      if (rows.length > PROGRESS_EVERY && (i + BATCH) % PROGRESS_EVERY < BATCH) {
+        console.log(`[mis-sap-middleware] staging progress: ${Math.min(i + BATCH, rows.length)}/${rows.length}`);
+      }
+    }
+    const { data: replaced, error: activateError } = await db.rpc("activate_zfisales_snapshot", {
+      _scope_key: syncScopeKey,
+      _snapshot_id: snapshotId,
+      _expected_count: rows.length,
+      _posting_from: postingRange.from,
+      _posting_to: postingRange.to,
+    });
+    if (activateError) {
+      await db.from("zfisales_detail").delete().eq("snapshot_id", snapshotId).eq("is_active_snapshot", false);
+      throw new Error(activateError.message);
+    }
+    return { received, stored: rows.length, replaced: replaced ?? 0, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingFrom: postingRange.from, postingTo: postingRange.to };
+  }
+
+  /**
+   * Runs one endpoint end to end: reads its saved configuration, calls SAP,
+   * stores the rows and records the run. Used by the tick and by the manual
+   * trigger endpoint.
+   */
+  async function runEndpoint(endpointName, { manual = false } = {}) {
+    if (!enabled) return { status: "error", message: "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not configured" };
+    if (inFlight.has(endpointName)) return { status: "skipped", reason: "Already running in this process" };
+    inFlight.add(endpointName);
+    const traceId = newTraceId();
+    const startedMs = Date.now();
+    let runId = null;
+    let snapshot = null;
+    try {
+      const { data: endpoint, error } = await db
+        .from("sap_endpoints")
+        .select(
+          "name, endpoint_path, system_key, http_method, query_params, headers, body_template, is_active, posting_range",
+        )
+        .eq("name", endpointName)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!endpoint) return { status: "error", message: `Endpoint ${endpointName} is not configured` };
+      if (!endpoint.is_active) return { status: "skipped", reason: "Endpoint is inactive" };
+
+      if (!manual && (await runInProgress(endpointName))) {
+        return { status: "skipped", reason: "A previous run is still in progress" };
+      }
+
+      const { data: systemRow } = endpoint.system_key
+        ? await db
+            .from("sap_systems")
+            .select("key, environment, base_url, sap_client, username")
+            .eq("key", endpoint.system_key)
+            .maybeSingle()
+        : await db
+            .from("sap_systems")
+            .select("key, environment, base_url, sap_client, username")
+            .eq("is_active", true)
+            .limit(1)
+            .maybeSingle();
+
+      const system = resolveSystem({
+        systemKey: systemRow?.key ?? endpoint.system_key ?? "dev",
+        environment: systemRow?.environment ?? undefined,
+        baseUrl: systemRow?.base_url ?? undefined,
+        sapClient: systemRow?.sap_client ?? undefined,
+        username: systemRow?.username ?? undefined,
+      });
+
+      const bodyText = withEndpointDates(
+        endpoint.name,
+        endpoint.body_template,
+        endpoint.posting_range,
+        new Date(),
+        !manual,
+      );
+      snapshot = {
+        source: manual ? "middleware-manual" : "middleware-scheduler",
+        systemKey: system.key,
+        environment: system.credentialKey,
+        baseUrl: system.baseUrl,
+        sapClient: system.client,
+        path: endpoint.endpoint_path,
+        method: endpoint.http_method,
+        query: keyValueObject(endpoint.query_params),
+        headers: keyValueObject(endpoint.headers),
+        body: bodyText ?? null,
+      };
+      runId = await startRun(endpointName, snapshot);
+
+      const result = await callSap({
+        traceId,
+        system,
+        path: endpoint.endpoint_path,
+        method: String(endpoint.http_method || "GET").toUpperCase(),
+        query: snapshot.query,
+        headers: snapshot.headers,
+        body: bodyText,
+      });
+
+      const bytes = Buffer.byteLength(result.body ?? "", "utf8");
+      const durationMs = Date.now() - startedMs;
+
+      if (!result.ok) {
+        const message = `SAP answered HTTP ${result.status} — no data was stored`;
+        await finishRun(runId, endpointName, {
+          status: "error",
+          error_message: message,
+          response_bytes: bytes,
+          duration_ms: durationMs,
+          http_status: result.status,
+        });
+        return { status: "error", message, httpStatus: result.status };
+      }
+
+      const text = result.body ?? "";
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = salvageTruncatedArray(text) ?? salvageTruncatedArray(extractEmbeddedBody(text) ?? "");
+        if (!payload) {
+          const preview = text.slice(0, 200).replace(/\s+/g, " ");
+          const message = `SAP returned ${formatBytes(bytes)} that could not be parsed as JSON — starts with: ${preview}`;
+          await finishRun(runId, endpointName, {
+            status: "error",
+            error_message: message,
+            response_bytes: bytes,
+            duration_ms: durationMs,
+            http_status: result.status,
+          });
+          return { status: "error", message };
+        }
+      }
+
+      const counts = await storeRows(payload, endpointName, snapshot);
+      await finishRun(runId, endpointName, {
+        status: "success",
+        records_received: counts.received,
+        records_stored: counts.stored,
+        records_replaced: counts.replaced,
+        records_invalid: counts.invalid,
+        records_inserted: counts.stored,
+        records_updated: 0,
+        records_skipped: counts.skipped,
+        sync_scope_key: counts.syncScopeKey,
+        snapshot_id: counts.snapshotId,
+        response_bytes: bytes,
+        duration_ms: Date.now() - startedMs,
+        http_status: result.status,
+        error_message: counts.received
+          ? `${counts.stored} stored; ${counts.replaced} replaced; ${counts.duplicates} repeated occurrences preserved; ${counts.invalid} invalid`
+          : `${counts.replaced} previous rows removed for this empty SAP snapshot`,
+      });
+      if (counts.stored > 0) {
+        await db
+          .from("sap_endpoints")
+          .update({ last_synced_at: new Date().toISOString() })
+          .eq("name", endpointName);
+      }
+      logLine(
+        `[${traceId}] sync ${endpointName}: received ${counts.received}, stored ${counts.stored}, replaced ${counts.replaced}, repeated occurrences ${counts.duplicates}, invalid ${counts.invalid}`,
+      );
+      return { status: "synced", ...counts };
+    } catch (err) {
+      const message = err?.message ?? String(err);
+      logLine(`[${traceId}] sync ${endpointName} failed: ${message}`);
+      try {
+        await finishRun(runId, endpointName, {
+          status: "error",
+          error_message: message,
+          duration_ms: Date.now() - startedMs,
+        });
+      } catch {
+        /* the failure itself must not throw */
+      }
+      return { status: "error", message };
+    } finally {
+      inFlight.delete(endpointName);
+    }
+  }
+
+  /** One minute tick: re-reads the saved schedules and fires the due ones. */
+  async function tick() {
+    if (!enabled) return;
+    const now = new Date();
+    const stamp = minuteKey(now);
+    try {
+      const { data, error } = await db
+        .from("sap_endpoints")
+        .select("name, schedule_expression, scheduler_enabled, is_active");
+      if (error) throw new Error(error.message);
+      for (const row of data ?? []) {
+        if (!row.scheduler_enabled || !row.is_active) continue;
+        const expression = String(row.schedule_expression || "").trim();
+        if (!expression || !scheduleMatches(expression, now)) continue;
+        if (lastFired.get(row.name) === stamp) continue;
+        lastFired.set(row.name, stamp);
+        logLine(`scheduler: ${row.name} is due (${expression})`);
+        runEndpoint(row.name).catch((err) => logLine(`scheduler error: ${err?.message ?? err}`));
+      }
+    } catch (err) {
+      logLine(`scheduler tick failed: ${err?.message ?? err}`);
+    }
+  }
+
+  function start() {
+    if (!enabled) {
+      logLine(
+        "scheduler DISABLED — set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in middleware/.env to enable automatic syncing",
+      );
+      return;
+    }
+    logLine("scheduler started — schedules are read from the portal every minute");
+    void tick();
+    // Align to the top of the next minute, then run once per minute.
+    const delay = 60000 - (Date.now() % 60000);
+    setTimeout(() => {
+      void tick();
+      setInterval(() => void tick(), 60000);
+    }, delay);
+  }
+
+  return { start, tick, runEndpoint, enabled };
+}

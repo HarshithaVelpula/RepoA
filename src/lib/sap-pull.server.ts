@@ -1,0 +1,831 @@
+/**
+ * Server-only: pull a SAP endpoint through the Node.js middleware and replace
+ * the rows into `zfisales_detail`. Shared by the manual fetch on the SAP API
+ * screen and by the scheduled 10-minute job.
+ */
+import { mapPayload } from "./zfisales-sync.server";
+import { mapOpenSalesOrdersPayload } from "./open-sales-orders-map";
+import { isZcashFlowEndpoint, mapZcashFlowPayload } from "./zcash-flow-map";
+import { isUserDropdownEndpoint, mapUserDropdownPayload } from "./user-dropdown-map";
+import { isOrderBookEndpoint, mapOrderBookPayload } from "./order-book-map";
+import { isSitEndpoint, mapSitPayload, staleSitKeys } from "./sit-map";
+import { isSalesRegisterEndpoint, mapSalesRegisterPayload } from "./sales-register-map";
+import { isOpenPoEndpoint, mapOpenPoPayload } from "./open-po-map";
+import { isCurrentStockEndpoint, mapCurrentStockPayload } from "./current-stock-map";
+import { isPurchaseOrdersEndpoint, mapPurchaseOrdersPayload } from "./purchase-orders-map";
+import { isDailyProductionEndpoint, mapDailyProductionPayload } from "./daily-production-map";
+import { isPurchaseRegisterEndpoint, mapPurchaseRegisterPayload } from "./purchase-register-map";
+import {
+  extractEmbeddedBody,
+  keyValueObject,
+  salvageTruncatedArray,
+  isOpenSalesOrdersEndpoint,
+  withEndpointDates,
+} from "./sap-pull-shared";
+
+const BATCH = 500;
+
+/** How many sync runs are kept per endpoint; older rows are deleted. */
+const RUN_HISTORY_LIMIT = 6;
+
+export type SyncCounts = {
+  received: number;
+  stored: number;
+  replaced: number;
+  skipped: number;
+  invalid: number;
+  duplicates: number;
+  syncScopeKey: string;
+  snapshotId: string;
+  postingFrom: string | null;
+  postingTo: string | null;
+};
+
+type Admin = Awaited<typeof import("@/integrations/supabase/client.server")>["supabaseAdmin"];
+
+async function admin(): Promise<Admin> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin;
+}
+
+export type RunMetrics = { responseBytes?: number; durationMs?: number; httpStatus?: number };
+
+/** Stages every SAP occurrence, then atomically activates this request snapshot. */
+export async function storeZfisalesPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const startedAt = new Date().toISOString();
+  const { received, rows, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingRange } = mapPayload(
+    payload,
+    endpointName,
+    requestSnapshot,
+  );
+
+  const { data: run } = await db
+    .from("sap_sync_runs")
+    .insert({
+      endpoint: endpointName,
+      status: "running",
+      started_at: startedAt,
+      records_received: received,
+      records_skipped: skipped,
+      records_invalid: invalid,
+      sync_scope_key: syncScopeKey,
+      snapshot_id: snapshotId,
+      response_bytes: metrics.responseBytes ?? 0,
+      duration_ms: metrics.durationMs ?? 0,
+      ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+      ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+    })
+    .select("id")
+    .single();
+
+
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) {
+      await db
+        .from("sap_sync_runs")
+        .update({ finished_at: new Date().toISOString(), ...patch })
+        .eq("id", run.id);
+    }
+    await pruneRuns(endpointName);
+  };
+
+
+  try {
+    if (!rows.length || !postingRange) {
+      await finish({
+        status: received ? "error" : "success",
+        records_replaced: 0,
+        records_invalid: invalid,
+        error_message: received
+          ? "No mappable rows in the SAP response — existing data left unchanged"
+          : "SAP returned no rows — existing data left unchanged",
+      });
+      return { received, stored: 0, replaced: 0, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingFrom: null, postingTo: null };
+    }
+
+
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db
+        .from("zfisales_detail")
+        .insert(rows.slice(i, i + BATCH) as never);
+      if (error) throw error;
+    }
+    const { data: replaced, error: activateError } = await db.rpc("activate_zfisales_snapshot", {
+      _scope_key: syncScopeKey,
+      _snapshot_id: snapshotId,
+      _expected_count: rows.length,
+      _posting_from: postingRange.from,
+      _posting_to: postingRange.to,
+    });
+    if (activateError) throw activateError;
+    await finish({
+      status: "success",
+      records_stored: rows.length,
+      records_replaced: replaced ?? 0,
+      records_invalid: invalid,
+      records_inserted: rows.length,
+      records_updated: 0,
+      error_message: `${rows.length} stored; ${replaced ?? 0} replaced; ${duplicates} repeated occurrences preserved; ${invalid} invalid`,
+    });
+    return { received, stored: rows.length, replaced: replaced ?? 0, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingFrom: postingRange.from, postingTo: postingRange.to };
+  } catch (err) {
+    await db.from("zfisales_detail").delete().eq("snapshot_id", snapshotId).eq("is_active_snapshot", false);
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Snapshot write failed" });
+    throw err;
+  }
+}
+
+/** Stages and atomically replaces the complete current Open Sales Orders result. */
+export async function storeOpenSalesOrdersPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  let mapped: ReturnType<typeof mapOpenSalesOrdersPayload>;
+  try {
+    mapped = mapOpenSalesOrdersPayload(payload, endpointName, requestSnapshot);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid Open Sales Orders response";
+    await logFailure(endpointName, message, requestSnapshot, metrics);
+    throw error;
+  }
+  const { received, rows, skipped, invalid, duplicates, syncScopeKey, snapshotId } = mapped;
+  const startedAt = new Date().toISOString();
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: startedAt, records_received: received,
+    records_skipped: skipped, records_invalid: invalid, sync_scope_key: syncScopeKey, snapshot_id: snapshotId,
+    response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  if (!rows.length) {
+    await finish({ status: received ? "error" : "success", records_replaced: 0, error_message: received ? "No valid VBELN + POSNR rows — existing data left unchanged" : "SAP returned no rows — existing data left unchanged" });
+    return { received, stored: 0, replaced: 0, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingFrom: null, postingTo: null };
+  }
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("open_sales_orders").insert(rows.slice(i, i + BATCH) as never);
+      if (error) throw error;
+    }
+    const { data: replaced, error } = await db.rpc("activate_open_sales_orders_snapshot", { _scope_key: syncScopeKey, _snapshot_id: snapshotId, _expected_count: rows.length });
+    if (error) throw error;
+    await finish({ status: "success", records_stored: rows.length, records_replaced: replaced ?? 0, records_inserted: rows.length, records_updated: 0, error_message: `${rows.length} stored; ${replaced ?? 0} previous rows replaced` });
+    return { received, stored: rows.length, replaced: replaced ?? 0, skipped, invalid, duplicates, syncScopeKey, snapshotId, postingFrom: null, postingTo: null };
+  } catch (err) {
+    await db.from("open_sales_orders").delete().eq("snapshot_id", snapshotId).eq("is_active_snapshot", false);
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Open Sales Orders snapshot write failed" });
+    throw err;
+  }
+}
+
+/** Inserts or updates ZCASHFLOWN rows on Profit Center + Plant + GL Code. */
+export async function storeZcashFlowPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapZcashFlowPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "zcash_flow", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("zcash_flow").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "profit_center,plant,gl_code" });
+      if (error) throw error;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Cash flow write failed" });
+    throw err;
+  }
+}
+
+/** Inserts or updates User Management dropdown rows on category + code. */
+export async function storeUserDropdownPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapUserDropdownPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "sap_user_dropdown_masters", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("sap_user_dropdown_masters").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "category,code" });
+      if (error) throw error;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Dropdown write failed" });
+    throw err;
+  }
+}
+
+/** Inserts or updates Order Book lines on VBELN + POSNR. */
+export async function storeOrderBookPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapOrderBookPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "order_book", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("order_book").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "sales_order,sales_order_item" });
+      if (error) throw error;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated; ${invalid} without VBELN + POSNR` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Order Book write failed" });
+    throw err;
+  }
+}
+
+export async function storeSitPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapSitPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "sales_in_transit", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("sales_in_transit").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "vbeln,posnr" });
+      if (error) throw error;
+    }
+    const existing: { vbeln: string; posnr: string }[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await db.from("sales_in_transit").select("vbeln,posnr").order("vbeln").order("posnr").range(from, from + 999);
+      if (error) throw error;
+      existing.push(...((data ?? []) as { vbeln: string; posnr: string }[]));
+      if (!data || data.length < 1000) break;
+    }
+    const stale = staleSitKeys(existing, rows);
+    const byDoc = new Map<string, string[]>();
+    for (const k of stale) byDoc.set(k.vbeln, [...(byDoc.get(k.vbeln) ?? []), k.posnr]);
+    for (const [vbeln, posnrs] of byDoc) {
+      const { error } = await db.from("sales_in_transit").delete().eq("vbeln", vbeln).in("posnr", posnrs);
+      if (error) throw error;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: `${rows.length} added or updated, ${stale.length} removed; ${invalid} without VBELN + POSNR` });
+    return { ...base, replaced: stale.length, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "SIT write failed" });
+    throw err;
+  }
+}
+
+export async function storeSalesRegisterPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapSalesRegisterPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "sales_register", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("sales_register").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "vbeln,posnr" });
+      if (error) throw error;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated; ${invalid} without VBELN + POSNR` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Sales Register write failed" });
+    throw err;
+  }
+}
+
+export async function storePurchaseRegisterPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapPurchaseRegisterPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "purchase_register", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("purchase_register").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "belnr,buzei,mblnr,zeile" });
+      if (error) throw error;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated; ${invalid} without BELNR` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Purchase Register write failed" });
+    throw err;
+  }
+}
+
+/** ZME2N Purchase Orders: upsert on PO + PO_ITEM; delete lines in the returned PO-date span that SAP no longer lists. */
+export async function storePurchaseOrdersPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapPurchaseOrdersPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "purchase_orders", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("purchase_orders").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "po,po_item" });
+      if (error) throw error;
+    }
+    // Lines inside the returned PO-date window that SAP no longer lists are removed.
+    let removed = 0;
+    const dates = rows.map((r) => r["po_date"] as string | null).filter((d): d is string => !!d).sort();
+    if (rows.length && dates.length) {
+      const syncedAt = rows[0]!["synced_at"] as string;
+      const { count, error } = await db.from("purchase_orders").delete({ count: "exact" })
+        .gte("po_date", dates[0]).lte("po_date", dates[dates.length - 1]).lt("synced_at", syncedAt);
+      if (error) throw error;
+      removed = count ?? 0;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated; ${removed} missing lines removed; ${invalid} without PO` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, replaced: removed, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Purchase Orders write failed" });
+    throw err;
+  }
+}
+
+export async function storeCurrentStockPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapCurrentStockPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "current_stock", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("current_stock").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "matnr,werks,lgort,charg" });
+      if (error) throw error;
+    }
+    // SAP returns the full current stock: lines not refreshed by a successful non-empty reply are gone.
+    let removed = 0;
+    if (rows.length) {
+      const { count, error } = await db.from("current_stock").delete({ count: "exact" }).lt("synced_at", rows[0]!["synced_at"] as string);
+      if (error) throw error;
+      removed = count ?? 0;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated; ${removed} old lines removed; ${invalid} without MATNR` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, replaced: removed, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Current Stock write failed" });
+    throw err;
+  }
+}
+
+export async function storeDailyProductionPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapDailyProductionPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "daily_production", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("daily_production" as never).upsert(rows.slice(i, i + BATCH) as never, { onConflict: "mblnr,mjahr,zeile" });
+      if (error) throw error;
+    }
+    // Lines inside the returned posting-date span not refreshed by this run were reversed/removed in SAP.
+    let removed = 0;
+    const dates = rows.map((r) => r["budat"] as string | null).filter(Boolean).sort() as string[];
+    if (rows.length && dates.length) {
+      const { count, error } = await db.from("daily_production" as never).delete({ count: "exact" }).gte("budat", dates[0]!).lte("budat", dates[dates.length - 1]!).lt("synced_at", rows[0]!["synced_at"] as string);
+      if (error) throw error;
+      removed = count ?? 0;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated; ${removed} old lines removed; ${invalid} without MBLNR` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, replaced: removed, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Daily Production write failed" });
+    throw err;
+  }
+}
+
+export async function storeOpenPoPayload(
+  payload: unknown,
+  endpointName: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+): Promise<SyncCounts> {
+  const db = await admin();
+  const { received, rows, invalid, duplicates } = mapOpenPoPayload(payload, endpointName);
+  const { data: run } = await db.from("sap_sync_runs").insert({
+    endpoint: endpointName, status: "running", started_at: new Date().toISOString(), records_received: received,
+    records_invalid: invalid, response_bytes: metrics.responseBytes ?? 0, duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  }).select("id").single();
+  const finish = async (patch: Record<string, unknown>) => {
+    if (run?.id) await db.from("sap_sync_runs").update({ finished_at: new Date().toISOString(), ...patch }).eq("id", run.id);
+    await pruneRuns(endpointName);
+  };
+  const base = { received, replaced: 0, skipped: 0, invalid, duplicates, syncScopeKey: "open_purchase_order", snapshotId: "", postingFrom: null, postingTo: null };
+  try {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db.from("open_purchase_order").upsert(rows.slice(i, i + BATCH) as never, { onConflict: "ebeln,ebelp" });
+      if (error) throw error;
+    }
+    // Lines inside the returned document-date window that SAP no longer lists are closed — remove them.
+    let removed = 0;
+    const dates = rows.map((r) => r["bedat"] as string | null).filter((d): d is string => !!d).sort();
+    if (rows.length && dates.length) {
+      const syncedAt = rows[0]!["synced_at"] as string;
+      const { count, error } = await db.from("open_purchase_order").delete({ count: "exact" })
+        .gte("bedat", dates[0]).lte("bedat", dates[dates.length - 1]).lt("synced_at", syncedAt);
+      if (error) throw error;
+      removed = count ?? 0;
+    }
+    await finish({ status: "success", records_stored: rows.length, records_inserted: rows.length, error_message: received ? `${rows.length} inserted or updated; ${removed} closed lines removed; ${invalid} without EBELN` : "SAP returned no rows — existing data left unchanged" });
+    return { ...base, replaced: removed, stored: rows.length };
+  } catch (err) {
+    await finish({ status: "error", error_message: err instanceof Error ? err.message : "Open Purchase Order write failed" });
+    throw err;
+  }
+}
+
+/** True when another run is still in flight (single-flight guard). */
+async function runInProgress(endpointName: string): Promise<boolean> {
+  const db = await admin();
+  const since = new Date(Date.now() - 9 * 60 * 1000).toISOString();
+  const { data } = await db
+    .from("sap_sync_runs")
+    .select("id")
+    .eq("endpoint", endpointName)
+    .eq("status", "running")
+    .gte("started_at", since)
+    .limit(1);
+  return (data ?? []).length > 0;
+}
+
+/** Keeps only the newest `keep` runs for an endpoint; older rows are deleted. */
+async function pruneRuns(endpointName: string, keep = RUN_HISTORY_LIMIT): Promise<void> {
+  try {
+    const db = await admin();
+    const { data } = await db
+      .from("sap_sync_runs")
+      .select("id")
+      .eq("endpoint", endpointName)
+      .order("started_at", { ascending: false })
+      .range(keep, keep + 500);
+    const stale = (data ?? []).map((r) => r.id);
+    if (stale.length) await db.from("sap_sync_runs").delete().in("id", stale);
+  } catch {
+    // History pruning must never break a sync.
+  }
+}
+
+export type RunOutcome = { httpStatus?: number; durationMs?: number; bytes?: number; preview?: string };
+
+export type PullResult =
+  | ({ status: "synced" } & SyncCounts & RunOutcome)
+  | { status: "skipped"; reason: string }
+  | ({ status: "error"; message: string } & RunOutcome);
+
+
+/** Calls the middleware for the given endpoint and stores the response. */
+export async function pullSapEndpoint(
+  endpointName: string,
+  options: { scheduled?: boolean } = {},
+): Promise<PullResult> {
+  if (await runInProgress(endpointName)) {
+    const reason = "A sync is already running — this scheduled attempt was skipped";
+    await logSkipped(endpointName, reason);
+    return { status: "skipped", reason };
+  }
+
+  const db = await admin();
+  const secret = process.env["MIDDLEWARE_SHARED_SECRET"];
+  if (!secret) return { status: "error", message: "MIDDLEWARE_SHARED_SECRET is not configured" };
+
+  const { data: endpoint } = await db
+    .from("sap_endpoints")
+    .select("name, endpoint_path, system_key, http_method, auth_type, query_params, headers, body_template, is_active, posting_range")
+    .eq("name", endpointName)
+    .maybeSingle();
+  if (!endpoint) return { status: "error", message: `Endpoint ${endpointName} is not configured` };
+  if (!endpoint.is_active) return { status: "skipped", reason: "Endpoint is inactive" };
+
+  const { data: config } = await db.from("sap_middleware_config").select("middleware_url").limit(1).maybeSingle();
+  const base = config?.middleware_url?.trim().replace(/\/+$/, "");
+  if (!base) return { status: "error", message: "Middleware URL is not configured" };
+
+  const { data: system } = endpoint.system_key
+    ? await db.from("sap_systems").select("key, environment, base_url, sap_client").eq("key", endpoint.system_key).maybeSingle()
+    : await db.from("sap_systems").select("key, environment, base_url, sap_client").eq("is_active", true).limit(1).maybeSingle();
+
+  const outbound = {
+    middlewareUrl: `${base}/sap/call`,
+    systemKey: system?.key ?? null,
+    environment: system?.environment ?? null,
+    baseUrl: system?.base_url ?? null,
+    sapClient: system?.sap_client ?? null,
+    path: endpoint.endpoint_path,
+    method: endpoint.http_method,
+    authType: endpoint.auth_type,
+    query: keyValueObject(endpoint.query_params),
+    headers: keyValueObject(endpoint.headers),
+    body: withEndpointDates(
+      endpoint.name,
+      endpoint.body_template,
+      endpoint.posting_range,
+      new Date(),
+      options.scheduled === true,
+    ),
+  };
+
+  const startedMs = Date.now();
+  const size = (bytes: number) =>
+    bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+
+  /** One call to the middleware, returning the raw text plus metrics. */
+  const callMiddleware = async (): Promise<
+    | { ok: true; response: Response; text: string; bytes: number }
+    | { ok: false; message: string; retryable: boolean }
+  > => {
+    let response: Response;
+    try {
+      response = await fetch(`${base}/sap/call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-shared-secret": secret },
+        body: JSON.stringify(outbound),
+        // Large report windows can take minutes to stream back from SAP.
+        signal: AbortSignal.timeout(300000),
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "fetch failed";
+      return {
+        ok: false,
+        retryable: true,
+        message: `Middleware/tunnel unreachable (${reason}) — SAP was not contacted`,
+      };
+    }
+
+    // Read as a stream so multi-MB SAP responses are not truncated.
+    const buffer = await response.arrayBuffer();
+    const text = new TextDecoder().decode(buffer);
+    return { ok: true, response, text, bytes: buffer.byteLength };
+  };
+
+  let attempt = await callMiddleware();
+  if (!attempt.ok && attempt.retryable) {
+    await new Promise((r) => setTimeout(r, 3000));
+    attempt = await callMiddleware();
+  }
+  if (!attempt.ok) {
+    const durationMs = Date.now() - startedMs;
+    await logFailure(endpointName, attempt.message, outbound, { durationMs });
+    return { status: "error", message: attempt.message, durationMs, bytes: 0 };
+  }
+
+
+  let { response, text, bytes } = attempt;
+
+  // A 404/502 here is the tunnel or middleware, never SAP — retry once for reconnects.
+  if (!response.ok && [404, 502, 503, 504].includes(response.status)) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const retry = await callMiddleware();
+    if (retry.ok) ({ response, text, bytes } = retry);
+  }
+
+  const durationMs = Date.now() - startedMs;
+  let envelope: Record<string, unknown> = {};
+  try {
+    envelope = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    envelope = {};
+  }
+
+  if (!response.ok) {
+    const detail = typeof envelope["message"] === "string" ? (envelope["message"] as string) : "";
+    const hop = [404, 502, 503, 504].includes(response.status)
+      ? `Middleware/tunnel returned ${response.status} at ${base}/sap/call — SAP was not contacted (tunnel URL may be stale or the middleware is not running)`
+      : `Middleware returned HTTP ${response.status} at ${base}/sap/call`;
+    const message = detail ? `${hop}: ${detail}` : hop;
+    await logFailure(endpointName, message, outbound, {
+      durationMs,
+      responseBytes: bytes,
+      httpStatus: response.status,
+    });
+    return { status: "error", message, durationMs, bytes, httpStatus: response.status };
+  }
+
+  const embedded = typeof envelope["body"] === "string" ? (envelope["body"] as string) : extractEmbeddedBody(text);
+  const bodyText = embedded ?? text;
+  const reportedBytes = typeof envelope["bytes"] === "number" ? (envelope["bytes"] as number) : null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    // An older middleware build cuts the body mid-document. Salvage every
+    // complete object of a truncated JSON array instead of losing the run.
+    const salvaged = salvageTruncatedArray(bodyText);
+    if (salvaged) {
+      payload = salvaged;
+    } else {
+      const ctype = typeof envelope["contentType"] === "string" ? ` (content-type ${envelope["contentType"]})` : "";
+      const preview = bodyText.slice(0, 200).replace(/\s+/g, " ");
+      // Name the hop that cut the payload: SAP's own byte count vs what arrived.
+      const cut =
+        reportedBytes && reportedBytes > bodyText.length
+          ? ` — the middleware delivered ${size(bodyText.length)} of a ${size(reportedBytes)} SAP response, so it is truncating (update middleware/server.mjs and restart it)`
+          : "";
+      const message = `SAP returned ${size(bytes)}${ctype} that could not be parsed as JSON${cut} — starts with: ${preview}`;
+      await logFailure(endpointName, message, outbound, {
+        durationMs,
+        responseBytes: bytes,
+        httpStatus: response.status,
+      });
+      return { status: "error", message, durationMs, bytes, httpStatus: response.status, preview };
+    }
+  }
+
+
+
+  const counts = await (isDailyProductionEndpoint(endpointName) ? storeDailyProductionPayload : isCurrentStockEndpoint(endpointName) ? storeCurrentStockPayload : isOpenPoEndpoint(endpointName) ? storeOpenPoPayload : isPurchaseOrdersEndpoint(endpointName) ? storePurchaseOrdersPayload : isPurchaseRegisterEndpoint(endpointName) ? storePurchaseRegisterPayload : isSalesRegisterEndpoint(endpointName) ? storeSalesRegisterPayload : isSitEndpoint(endpointName) ? storeSitPayload : isOrderBookEndpoint(endpointName) ? storeOrderBookPayload : isUserDropdownEndpoint(endpointName) ? storeUserDropdownPayload : isZcashFlowEndpoint(endpointName) ? storeZcashFlowPayload : isOpenSalesOrdersEndpoint(endpointName) ? storeOpenSalesOrdersPayload : storeZfisalesPayload)(payload, endpointName, outbound, {
+    durationMs,
+    responseBytes: bytes,
+    httpStatus: response.status,
+  });
+  const now = new Date().toISOString();
+  await db
+    .from("sap_endpoints")
+    .update({
+      // Only move the synced stamp when rows were actually written.
+      ...(counts.stored > 0 ? { last_synced_at: now } : {}),
+      last_run_at: now,
+      last_run_status: "success",
+    })
+    .eq("name", endpointName);
+  return {
+    status: "synced",
+    ...counts,
+    durationMs,
+    bytes,
+    httpStatus: response.status,
+    // Small excerpt only — the full body is never returned to the browser.
+    preview: bodyText.slice(0, 4000),
+  };
+}
+
+
+async function logFailure(
+  endpointName: string,
+  message: string,
+  requestSnapshot?: unknown,
+  metrics: RunMetrics = {},
+) {
+  const db = await admin();
+  const now = new Date().toISOString();
+  await db.from("sap_sync_runs").insert({
+    endpoint: endpointName,
+    status: "error",
+    started_at: now,
+    finished_at: now,
+    error_message: message,
+    response_bytes: metrics.responseBytes ?? 0,
+    duration_ms: metrics.durationMs ?? 0,
+    ...(metrics.httpStatus === undefined ? {} : { http_status: metrics.httpStatus }),
+    ...(requestSnapshot === undefined ? {} : { request_snapshot: requestSnapshot as never }),
+  });
+
+  await db
+    .from("sap_endpoints")
+    .update({ last_run_at: now, last_run_status: "error" })
+    .eq("name", endpointName);
+
+  await pruneRuns(endpointName);
+}
+
+/** Records a scheduled attempt that could not start, so the history stays honest. */
+async function logSkipped(endpointName: string, message: string) {
+  const db = await admin();
+  const now = new Date().toISOString();
+  await db.from("sap_sync_runs").insert({
+    endpoint: endpointName,
+    status: "skipped",
+    started_at: now,
+    finished_at: now,
+    error_message: message,
+  });
+  await pruneRuns(endpointName);
+}

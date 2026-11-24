@@ -1,0 +1,2019 @@
+import { useEffect, useMemo, useState } from "react";
+import { applyDateWindow, buildPayloadText, parsePayloadFields, stripJsonComments } from "@/lib/payload-fields";
+import { getPayloadPath, setPayloadPaths } from "@/lib/payload-paths";
+import { isOpenPoEndpoint } from "@/lib/open-po-map";
+import { isDailyProductionEndpoint } from "@/lib/daily-production-map";
+const dprIso = (d: string) => (/^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d);
+import { isPurchaseOrdersEndpoint } from "@/lib/purchase-orders-map";
+import { isSitEndpoint } from "@/lib/sit-map";
+import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { format } from "date-fns";
+import { formatDateTimeISTLabel } from "@/lib/format";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Database,
+  Pencil,
+  Plug,
+  Plus,
+  Radio,
+  RefreshCw,
+  Save,
+  Server,
+  ShieldCheck,
+  Trash2,
+  CalendarIcon,
+  CalendarClock,
+} from "lucide-react";
+import {
+  CRON_PRESETS,
+  dailySyncTimesExpression,
+  describeSchedule,
+  isValidScheduleExpression,
+  nextScheduleRuns,
+  parseDailySyncTimes,
+} from "@/lib/cron";
+
+/** Plain-English schedule read-out plus the next three run times in IST. */
+function SchedulePreview({ expression, enabled }: { expression: string; enabled: boolean }) {
+  const valid = isValidScheduleExpression(expression);
+  const runs = valid && enabled ? nextScheduleRuns(expression, 3) : [];
+  return (
+    <div className="rounded-sm border border-border bg-muted/40 p-3 text-xs">
+      <p className={valid ? "font-medium text-card-foreground" : "font-medium text-destructive"}>
+        {expression.trim() ? describeSchedule(expression) : "No interval set"}
+      </p>
+      {!enabled ? (
+        <p className="mt-1 text-muted-foreground">Scheduled sync is switched off.</p>
+      ) : runs.length ? (
+        <ol className="mt-2 space-y-0.5 text-muted-foreground">
+          {runs.map((d, i) => (
+            <li key={d.toISOString()}>
+              {i + 1}. {formatDateTimeISTLabel(d.toISOString())}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <p className="mt-2 text-muted-foreground">
+        Saved here and applied to the background scheduler immediately — nothing is fixed in code.
+      </p>
+    </div>
+  );
+}
+
+function DailySyncTimes({
+  expression,
+  onChange,
+}: {
+  expression: string;
+  onChange: (expression: string) => void;
+}) {
+  const parsed = parseDailySyncTimes(expression);
+  const dailyMode = parsed !== null;
+  const times = parsed ?? [];
+
+  function updateTime(index: number, value: string) {
+    onChange(dailySyncTimesExpression(times.map((time, i) => (i === index ? value : time))));
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex w-fit rounded-md border border-border bg-muted p-1">
+        <Button
+          type="button"
+          size="sm"
+          variant={dailyMode ? "default" : "ghost"}
+          onClick={() => onChange(dailySyncTimesExpression(times.length ? times : ["05:30"]))}
+        >
+          Daily times
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={dailyMode ? "ghost" : "default"}
+          onClick={() => onChange("0 0 * * *")}
+        >
+          Advanced
+        </Button>
+      </div>
+
+      {dailyMode ? (
+        <Field label="Daily sync times (IST)" hint="Add each time the SAP sync should run every day.">
+          <div className="space-y-2">
+            {times.map((time, index) => (
+              <div key={`${time}-${index}`} className="flex max-w-sm items-center gap-2">
+                <Input
+                  type="time"
+                  value={time}
+                  aria-label={`Daily sync time ${index + 1}`}
+                  onChange={(event) => updateTime(index, event.target.value)}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  aria-label={`Remove ${time} sync time`}
+                  disabled={times.length === 1}
+                  onClick={() => onChange(dailySyncTimesExpression(times.filter((_, i) => i !== index)))}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={() => onChange(dailySyncTimesExpression([...times, "13:00"]))}
+            >
+              <Plus className="size-4" /> Add time
+            </Button>
+          </div>
+        </Field>
+      ) : (
+        <Field
+          label="Advanced schedule"
+          hint="Pick a preset or enter a standard 5-field schedule. Times use the middleware server timezone."
+        >
+          <div className="relative">
+            <Input value={expression} onChange={(event) => onChange(event.target.value)} className="pr-10" />
+            <Select value="" onValueChange={onChange}>
+              <SelectTrigger
+                aria-label="Choose an interval"
+                className="absolute right-0 top-0 h-full w-10 justify-center border-0 bg-transparent px-0 shadow-none [&>svg:last-child]:hidden"
+              >
+                <CalendarClock className="size-4 text-muted-foreground" />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {CRON_PRESETS.map((preset) => (
+                  <SelectItem key={preset.expression} value={preset.expression}>
+                    {preset.label} — {preset.expression}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </Field>
+      )}
+    </div>
+  );
+}
+
+import { AccessDenied, ReportShell } from "@/components/report-shell";
+import { useLaunchpad } from "@/lib/use-launchpad";
+import {
+  AUTH_TYPES,
+  CONNECTION_MODES,
+  DEPLOYMENT_MODES,
+  ENVIRONMENTS,
+  HTTP_METHODS,
+  createSapEndpoint,
+  deleteSapEndpoint,
+  deleteSapSystem,
+  fetchMiddlewareLogs,
+  getMiddlewareConfig,
+  getMiddlewareSystemStatuses,
+  listSapEndpoints,
+  listSapSystems,
+  listSyncRuns,
+  listLatestRuns,
+  pingSapHost,
+  resolveEndpointUrl,
+  saveMiddlewareConfig,
+  saveSapSystem,
+  testMiddleware,
+  testSapEndpoint,
+  testSapSystem,
+  updateSapEndpoint,
+  type EndpointInput,
+  type KeyValue,
+  type SapEndpoint,
+  type SapSystem,
+  type TestResult,
+} from "@/lib/sap-api.functions";
+import {
+  POSTING_RANGES,
+  isOpenSalesOrdersEndpoint,
+  postingWindow,
+} from "@/lib/sap-pull-shared";
+
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+
+/**
+ * One toast that says which leg of portal -> middleware -> SAP was reached,
+ * so a failure can never be confused with "SAP rejected us".
+ */
+function reportTest(result: TestResult) {
+  const trace = result.traceId ? ` · trace ${result.traceId}` : "";
+  if (result.noData) {
+    toast.warning(`${result.message}${trace}`);
+    return;
+  }
+  if (result.ok) {
+    toast.success(`${result.message}${trace}`);
+    return;
+  }
+  if (result.sapContacted) {
+    toast.error(
+      `SAP was reached — it answered HTTP ${result.sapStatus ?? "?"} in ${result.durationMs} ms${trace}`,
+    );
+    return;
+  }
+  toast.error(`SAP was NOT contacted — ${result.message}${trace}`);
+}
+
+/** Recent middleware activity, read straight from the service. */
+function MiddlewareActivity() {
+  const logsQuery = useQuery({
+    queryKey: ["middleware-logs"],
+    queryFn: () => fetchMiddlewareLogs(80),
+    retry: false,
+  });
+  const lines = logsQuery.data ?? [];
+
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-muted-foreground">Recent middleware activity</p>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            disabled={logsQuery.isFetching}
+            onClick={() => logsQuery.refetch()}
+          >
+            <RefreshCw className="size-3.5" /> Refresh
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            disabled={!lines.length}
+            onClick={() => {
+              navigator.clipboard.writeText(lines.join("\n"));
+              toast.success("Log copied");
+            }}
+          >
+            <Copy className="size-3.5" /> Copy
+          </Button>
+        </div>
+      </div>
+      {logsQuery.isError ? (
+        <p className="text-xs text-destructive">{(logsQuery.error as Error).message}</p>
+      ) : (
+        <pre className="max-h-72 overflow-auto rounded-md bg-muted p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+          {lines.length ? lines.join("\n") : "No activity recorded yet — run Test connection."}
+        </pre>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Lines starting with <span className="font-mono">-&gt; SAP</span> mean the request left the
+        middleware; <span className="font-mono">&lt;-</span> is SAP&apos;s answer;{" "}
+        <span className="font-mono">xx</span> means SAP was never contacted.
+      </p>
+    </div>
+  );
+}
+
+const formatBytes = (bytes: number) => {
+  if (!bytes) return "—";
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+};
+
+const formatDuration = (ms: number) => (ms ? `${(ms / 1000).toFixed(1)}s` : "—");
+
+/** Last runs of the 10-minute scheduled sync, straight from the run log. */
+function SchedulerHealth({ endpointName }: { endpointName: string }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const runsQuery = useQuery({
+    queryKey: ["sync-runs", endpointName],
+    queryFn: () => listSyncRuns(endpointName, 10),
+    enabled: Boolean(endpointName),
+    retry: false,
+  });
+  const runs = runsQuery.data ?? [];
+
+  return (
+    <div className="space-y-2 border-t border-border pt-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">Scheduler health — last 10 runs</p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          disabled={runsQuery.isFetching}
+          onClick={() => runsQuery.refetch()}
+        >
+          <RefreshCw className="size-3.5" /> Refresh
+        </Button>
+      </div>
+      {runs.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No sync run recorded yet.</p>
+      ) : (
+        <div className="overflow-auto rounded-md border border-border">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/70 text-left">
+              <tr>
+                <th className="w-8 px-2 py-2" />
+                <th className="px-3 py-2 font-semibold">Started</th>
+                <th className="px-3 py-2 font-semibold">Status</th>
+                <th className="px-3 py-2 font-semibold text-right">Received</th>
+                <th className="px-3 py-2 font-semibold text-right">Stored</th>
+                <th className="px-3 py-2 font-semibold text-right">Replaced</th>
+                <th className="px-3 py-2 font-semibold text-right">Invalid</th>
+                <th className="px-3 py-2 font-semibold text-right">Size</th>
+                <th className="px-3 py-2 font-semibold text-right">Time</th>
+                <th className="px-3 py-2 font-semibold">Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => {
+                const open = expanded === run.id;
+                return (
+                  <>
+                    <tr
+                      key={run.id}
+                      className="cursor-pointer border-t border-border hover:bg-muted/40"
+                      onClick={() => setExpanded(open ? null : run.id)}
+                    >
+                      <td className="px-2 py-2 text-muted-foreground">
+                        {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{formatDateTimeISTLabel(run.started_at)}</td>
+                      <td
+                        className={`px-3 py-2 font-medium ${
+                          run.status === "error" ? "text-destructive" : "text-card-foreground"
+                        }`}
+                      >
+                        {run.status}
+                      </td>
+                      <td className="px-3 py-2 text-right">{run.records_received}</td>
+                      <td className="px-3 py-2 text-right">{run.records_stored}</td>
+                      <td className="px-3 py-2 text-right">{run.records_replaced}</td>
+                      <td className="px-3 py-2 text-right">{run.records_invalid}</td>
+                      <td className="px-3 py-2 text-right">{formatBytes(run.response_bytes ?? 0)}</td>
+                      <td className="px-3 py-2 text-right">{formatDuration(run.duration_ms ?? 0)}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{run.error_message ?? "—"}</td>
+                    </tr>
+                    {open ? (
+                      <tr key={`${run.id}-detail`} className="border-t border-border bg-muted/30">
+                        <td colSpan={10} className="px-3 py-3">
+                          <div className="grid gap-1 pb-2 text-[11px] text-muted-foreground sm:grid-cols-4">
+                            <span>
+                              HTTP status: <strong>{run.http_status ?? "—"}</strong>
+                            </span>
+                            <span>
+                              Response size: <strong>{formatBytes(run.response_bytes ?? 0)}</strong>
+                            </span>
+                            <span>
+                              Duration: <strong>{formatDuration(run.duration_ms ?? 0)}</strong>
+                            </span>
+                            <span>
+                              Finished:{" "}
+                              <strong>{run.finished_at ? formatDateTimeISTLabel(run.finished_at) : "—"}</strong>
+                            </span>
+                          </div>
+                          <p className="pb-2 text-[11px] text-muted-foreground">
+                            Request scope: <strong className="font-mono">{run.sync_scope_key ?? "—"}</strong>
+                          </p>
+                          <p className="pb-1 text-[11px] font-medium text-card-foreground">Payload sent on this run</p>
+                          <pre className="max-h-56 overflow-auto rounded-md bg-background p-3 font-mono text-[11px] text-muted-foreground">
+                            {run.request_snapshot
+                              ? JSON.stringify(run.request_snapshot, null, 2)
+                              : "No payload recorded for this run."}
+                          </pre>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground">
+        Click a row to see the exact payload, response size and which hop failed. A 404/502 means the
+        middleware/tunnel answered — SAP was never contacted.
+      </p>
+    </div>
+  );
+}
+
+
+export const Route = createFileRoute("/_authenticated/admin/sap-api")({
+
+  head: () => ({
+    meta: [
+      { title: "SAP API Settings — Nexus Analytics" },
+      {
+        name: "description",
+        content:
+          "Register dynamic SAP/REST endpoints, maintain SAP systems and configure the shared Node.js middleware.",
+      },
+      { property: "og:title", content: "SAP API Settings — Nexus Analytics" },
+      {
+        property: "og:description",
+        content: "Manage SAP integration endpoints, systems and middleware connectivity.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
+  component: SapApiSettings,
+});
+
+/* ------------------------- posting date helpers ------------------------- */
+
+/** `YYYY-MM-DD` (date input) -> `YYYYMMDD` (SAP payload). */
+function toSapDate(iso: string): string {
+  return iso.replace(/-/g, "");
+}
+
+/** `YYYYMMDD` (SAP payload) -> `YYYY-MM-DD` (date input). */
+function fromSapDate(sap: string): string {
+  const value = (sap ?? "").trim();
+  if (!/^\d{8}$/.test(value)) return "";
+  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+}
+
+/** Parse a SAP date without UTC conversion so the selected local day is preserved. */
+function dateFromSapValue(sap: string): Date | undefined {
+  const iso = fromSapDate(sap);
+  if (!iso) return undefined;
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return undefined;
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function sapValueFromDate(date: Date): string {
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+function isoDaysAgo(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+/** Parse a payload string into a flat string map; null when it is not a JSON object. */
+function parsePayload(raw: string): Record<string, string> | null {
+  const text = (raw ?? "").trim();
+  if (!text) return null;
+  try {
+    const parsed: unknown = JSON.parse(stripJsonComments(text));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [
+        key,
+        value === null || value === undefined ? "" : String(value),
+      ]),
+    );
+  } catch {
+    return null;
+  }
+}
+
+
+
+
+function defaultEndpoint(): EndpointInput {
+  return {
+    name: "",
+    module_key: "common",
+    description: "",
+    endpoint_path: "",
+    system_key: "",
+    http_method: "GET",
+    auth_type: "basic",
+    query_params: [],
+    headers: [],
+    body_template: "{}",
+    response_root: "",
+    response_notes: "",
+    scheduler_enabled: false,
+    schedule_expression: dailySyncTimesExpression(["05:30"]),
+    is_active: true,
+    posting_range: "custom",
+  };
+}
+
+
+function isZcashFlowName(value: string): boolean {
+  const n = (value ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return n === "zcashflow" || n === "zcashflown" || n.includes("zcashflown");
+}
+
+type ZcashPayload = {
+  company_code: string;
+  fiscal_year: string;
+  profit_center: { profit_center: string }[];
+  plant: { plant: string }[];
+  posting_date: { from_date?: string; to_date?: string };
+};
+
+export const ZCASH_DEFAULT_PAYLOAD: ZcashPayload = {
+  company_code: "1000",
+  fiscal_year: String(new Date().getFullYear()),
+  profit_center: [],
+  plant: [],
+  posting_date: {},
+};
+
+function parseZcash(raw: string): ZcashPayload | null {
+  try {
+    const v = JSON.parse(raw || "{}");
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    const list = (x: unknown, k: string) =>
+      Array.isArray(x)
+        ? x.map((i) => String((i && typeof i === "object" ? (i as Record<string, unknown>)[k] : i) ?? "").trim()).filter(Boolean)
+        : [];
+    const pd = v.posting_date && typeof v.posting_date === "object" ? v.posting_date : {};
+    return {
+      ...v,
+      company_code: String(v.company_code ?? ""),
+      fiscal_year: String(v.fiscal_year ?? ""),
+      profit_center: list(v.profit_center, "profit_center").map((profit_center) => ({ profit_center })),
+      plant: list(v.plant, "plant").map((plant) => ({ plant })),
+      posting_date: {
+        ...(pd.from_date ? { from_date: String(pd.from_date) } : {}),
+        ...(pd.to_date ? { to_date: String(pd.to_date) } : {}),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function assertZcashRequired(name: string, path: string, body: string) {
+  if (!isZcashFlowName(name) && !isZcashFlowName(path)) return;
+  const p = parseZcash(body);
+  if (!p) throw new Error("Request payload must be a valid JSON object");
+  if (!p.company_code.trim()) throw new Error("Company Code is required");
+  if (!/^\d{4}$/.test(p.fiscal_year)) throw new Error("Fiscal Year is required (4 digits)");
+}
+
+function ChipInput({ values, onChange, placeholder }: { values: string[]; onChange: (v: string[]) => void; placeholder: string }) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const parts = draft.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length) onChange([...values, ...parts.filter((p) => !values.includes(p))]);
+    setDraft("");
+  };
+  return (
+    <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-md border border-input px-2 py-1">
+      {values.map((v) => (
+        <span key={v} className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs">
+          {v}
+          <button type="button" aria-label={`Remove ${v}`} className="text-muted-foreground hover:text-foreground" onClick={() => onChange(values.filter((x) => x !== v))}>×</button>
+        </span>
+      ))}
+      <input
+        className="min-w-24 flex-1 bg-transparent text-sm outline-none"
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); }
+          if (e.key === "Backspace" && !draft && values.length) onChange(values.slice(0, -1));
+        }}
+        onBlur={add}
+      />
+    </div>
+  );
+}
+
+function ZcashFlowRequestFields({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const parsed = parseZcash(value);
+  if (!parsed) {
+    return <p className="text-xs text-destructive">Request payload must be a valid JSON object to edit these fields.</p>;
+  }
+  const update = (patch: Partial<ZcashPayload>) => onChange(JSON.stringify({ ...parsed, ...patch }, null, 2));
+  const setDate = (key: "from_date" | "to_date", iso: string) => {
+    const next = { ...parsed.posting_date };
+    if (iso) next[key] = toSapDate(iso); else delete next[key];
+    update({ posting_date: next });
+  };
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <Field label="Company Code *" hint="Required. Sent as company_code.">
+        <Input value={parsed.company_code} onChange={(e) => update({ company_code: e.target.value.trim() })} />
+      </Field>
+      <Field label="Fiscal Year *" hint="Required. Sent as fiscal_year.">
+        <Input inputMode="numeric" maxLength={4} value={parsed.fiscal_year} onChange={(e) => update({ fiscal_year: e.target.value.replace(/\D/g, "") })} />
+      </Field>
+      <div />
+      <Field label="Profit Centre" hint="Optional. Press Enter to add each code.">
+        <ChipInput placeholder="e.g. COFF100001" values={parsed.profit_center.map((p) => p.profit_center)} onChange={(v) => update({ profit_center: v.map((profit_center) => ({ profit_center })) })} />
+      </Field>
+      <Field label="Plant" hint="Optional. Press Enter to add each plant.">
+        <ChipInput placeholder="e.g. 1000" values={parsed.plant.map((p) => p.plant)} onChange={(v) => update({ plant: v.map((plant) => ({ plant })) })} />
+      </Field>
+      <div />
+      <Field label="Posting From Date" hint="Optional. Sent as posting_date.from_date.">
+        <Input type="date" value={fromSapDate(parsed.posting_date.from_date ?? "")} onChange={(e) => setDate("from_date", e.target.value)} />
+      </Field>
+      <Field label="Posting To Date" hint="Optional. Sent as posting_date.to_date.">
+        <Input type="date" value={fromSapDate(parsed.posting_date.to_date ?? "")} onChange={(e) => setDate("to_date", e.target.value)} />
+      </Field>
+    </div>
+  );
+}
+
+function isOrderBookName(value: string): boolean {
+  return (value ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase().includes("orderbook");
+}
+
+/** Keys the Date window drives: fkdat_f/fkdat_t when present, else the first _F/_T date pair. */
+function salesRegisterWindowKeys(keys: string[]): string[] {
+  const pair = (base: string) => [keys.find((k) => k.toLowerCase() === `${base}_f`), keys.find((k) => k.toLowerCase() === `${base}_t`)].filter((k): k is string => !!k);
+  const fk = pair("fkdat");
+  if (fk.length) return fk;
+  const first = keys.find((k) => /_F$/i.test(k));
+  return first ? pair(first.slice(0, -2).toLowerCase()) : [];
+}
+
+const DATE_NAMES: Record<string, string> = { fkdat: "Billing Date", erdat: "Creation Date", budat: "Posting Date" };
+function dateFieldLabel(key: string): string {
+  const m = key.match(/^(.*)_(F|T)$/i);
+  if (!m) return key;
+  const base = m[1] ?? "";
+  const name = DATE_NAMES[base.toLowerCase()] ?? base.toUpperCase();
+  return `${name} ${/f/i.test(m[2] ?? "") ? "From" : "To"} (${key.toUpperCase()})`;
+}
+
+function PayloadRequestFields({
+  value, range, onChange, onRange,
+}: { value: string; range: string; onChange: (v: string) => void; onRange: (r: string) => void }) {
+  const fields = parsePayloadFields(value);
+  // Preset windows show today's dates on open, not the ones saved on an earlier day.
+  useEffect(() => {
+    if (!fields?.length || range === "custom") return;
+    const keys = salesRegisterWindowKeys(fields.filter((f) => f.date && /_(F|T)$/i.test(f.key)).map((f) => f.key));
+    if (!keys.length) return;
+    const refreshed = applyDateWindow(fields, keys, range, postingWindow(range));
+    if (refreshed.some((f, i) => f.value !== fields[i]?.value)) onChange(buildPayloadText(refreshed));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, range]);
+  if (fields === null) return <p className="text-xs text-destructive">Request payload must be a valid JSON object to edit these fields.</p>;
+  if (!fields.length) return <p className="text-xs text-muted-foreground">Paste the request payload below — its fields appear here automatically.</p>;
+  const update = (key: string, v: string) => onChange(buildPayloadText(fields.map((f) => (f.key === key ? { ...f, value: v } : f))));
+  const dateFields = fields.filter((f) => f.date && /_(F|T)$/i.test(f.key));
+  const windowKeys = salesRegisterWindowKeys(dateFields.map((f) => f.key));
+  const rolling = range !== "custom" && windowKeys.length > 0;
+  const label = dateFieldLabel;
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {dateFields.length ? (
+        <Field label="Date window (daily sync)" hint={`Rolls ${windowKeys.map((k) => k.toUpperCase()).join(" / ")} to today on every sync; custom dates stay fixed.`}>
+          <Select value={range} onValueChange={(r) => {
+            onRange(r);
+            const w = postingWindow(r);
+            if (w) onChange(buildPayloadText(fields.map((f) => (windowKeys.includes(f.key) ? { ...f, value: /_F$/i.test(f.key) ? w.from : r === "today" ? "" : w.to } : f))));
+          }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {POSTING_RANGES.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
+      {fields.map((f) => (
+        <Field key={f.key} label={`${f.date ? label(f.key) : f.key}${f.optional ? "" : " *"}`} hint={`${f.optional ? "Optional. " : ""}Sent as ${f.key}${f.date ? " (YYYYMMDD)" : ""}.`}>
+          {f.date ? (
+            <Input type="date" disabled={rolling && windowKeys.includes(f.key)} value={fromSapDate(f.value)} onChange={(e) => update(f.key, e.target.value ? toSapDate(e.target.value) : "")} />
+          ) : (
+            <Input value={f.value} onChange={(e) => update(f.key, e.target.value)} />
+          )}
+        </Field>
+      ))}
+    </div>
+  );
+}
+
+function SapApiSettings() {
+  const { data: launchpad } = useLaunchpad();
+  const screens = launchpad?.screens;
+  const allowed = launchpad?.isSuperAdmin || (screens ?? []).includes("admin.sap-api");
+
+  const [editing, setEditing] = useState<{ id: string | null; input: EndpointInput } | null>(null);
+
+  return (
+    <ReportShell
+      title="SAP API Settings"
+      description="Register dynamic SAP/REST endpoints and configure the shared Node.js middleware."
+    >
+      {!launchpad ? (
+        <Skeleton className="h-64 w-full" />
+      ) : !allowed ? (
+        <AccessDenied area="SAP API Settings" />
+      ) : editing ? (
+        <EndpointDetail
+          id={editing.id}
+          input={editing.input}
+          onClose={() => setEditing(null)}
+        />
+      ) : (
+        <Tabs defaultValue="apis" className="space-y-5">
+          <TabsList>
+            <TabsTrigger value="apis" className="gap-2">
+              <Plug className="size-4" /> APIs
+            </TabsTrigger>
+            <TabsTrigger value="systems" className="gap-2">
+              <Database className="size-4" /> SAP Systems
+            </TabsTrigger>
+            <TabsTrigger value="middleware" className="gap-2">
+              <Server className="size-4" /> Middleware Configuration
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="apis">
+            <ApiList onNew={() => setEditing({ id: null, input: defaultEndpoint() })} onEdit={setEditing} />
+          </TabsContent>
+          <TabsContent value="systems">
+            <SystemsTab />
+          </TabsContent>
+          <TabsContent value="middleware">
+            <MiddlewareTab />
+          </TabsContent>
+        </Tabs>
+      )}
+    </ReportShell>
+  );
+}
+
+function toInput(endpoint: SapEndpoint): EndpointInput {
+  const base: EndpointInput = {
+    name: endpoint.name,
+    module_key: endpoint.module_key,
+    description: endpoint.description ?? "",
+    endpoint_path: endpoint.endpoint_path,
+    system_key: endpoint.system_key ?? "",
+    http_method: endpoint.http_method,
+    auth_type: endpoint.auth_type,
+    query_params: endpoint.query_params,
+    headers: endpoint.headers,
+    body_template: endpoint.body_template ?? "",
+    response_root: endpoint.response_root ?? "",
+    response_notes: endpoint.response_notes ?? "",
+    scheduler_enabled: endpoint.scheduler_enabled,
+    schedule_expression: endpoint.schedule_expression ?? "",
+    is_active: endpoint.is_active,
+    posting_range: endpoint.posting_range ?? "custom",
+  };
+  return withDefaultDates(base);
+}
+
+/**
+ * Backfill BUDAT_F / BUDAT_T. With a preset range the pickers show the window
+ * that will actually be sent (recomputed from today); with custom dates only
+ * missing/invalid values default to To = today, From = today − 7 days.
+ */
+function withDefaultDates(input: EndpointInput): EndpointInput {
+  if (isZcashFlowName(input.name) || isZcashFlowName(input.endpoint_path)) return input;
+  if (isOrderBookName(input.name) || isOrderBookName(input.endpoint_path)) return input;
+  if (isSitEndpoint(input.name) || isSitEndpoint(input.endpoint_path)) return input;
+  if (isDailyProductionEndpoint(input.name) || isDailyProductionEndpoint(input.endpoint_path)) {
+    const p = parsePayload(input.body_template);
+    if (!p) return input;
+    const { BUDAT_F: _f, BUDAT_T: _t, ...rest } = p;
+    const w = postingWindow(input.posting_range);
+    const iso = (d: string) => (/^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d);
+    if (w) { rest["FROMDT"] = iso(w.from); rest["TODT"] = iso(w.to); }
+    return { ...input, body_template: JSON.stringify(rest, null, 2) };
+  }
+  const zme2n = isPurchaseOrdersEndpoint(input.name) || isPurchaseOrdersEndpoint(input.endpoint_path);
+  if (zme2n || isOpenPoEndpoint(input.name) || isOpenPoEndpoint(input.endpoint_path)) {
+    // Preset windows show today's document dates in the pickers and payload.
+    const w = postingWindow(input.posting_range);
+    if (!w) return input;
+    const flat = zme2n && /BEDAT_FROM/i.test(input.body_template ?? "");
+    const [fk, tk] = flat ? ["BEDAT_FROM", "BEDAT_TO"] : zme2n ? ["document_date.from_date", "document_date.to_date"] : ["DOCUMENT_DATE.FROM_DATE", "DOCUMENT_DATE.TO_DATE"];
+    const next = setPayloadPaths(input.body_template, { [fk]: input.posting_range === "today" && !flat ? "" : w.from, [tk]: w.to });
+    return next === null ? input : { ...input, body_template: next };
+  }
+  const payload = parsePayload(input.body_template) ?? {};
+  if (isOpenSalesOrdersEndpoint(input.name)) {
+    const fkdat = payload["fkdat"] ?? "";
+    if (/^\d{8}$/.test(fkdat)) return input;
+    return {
+      ...input,
+      body_template: JSON.stringify({ ...payload, fkdat: toSapDate(isoDaysAgo(0)) }, null, 2),
+    };
+  }
+  const headerValue = (key: string) => input.headers.find((row) => row.key === key)?.value ?? "";
+  const usesPostingDates =
+    input.posting_range !== "custom" || "BUDAT_F" in payload || "BUDAT_T" in payload || !!headerValue("BUDAT_F");
+  if (!usesPostingDates) return input;
+  const current = {
+    BUDAT_F: payload["BUDAT_F"] || headerValue("BUDAT_F"),
+    BUDAT_T: payload["BUDAT_T"] || headerValue("BUDAT_T"),
+  };
+  const rolling = postingWindow(input.posting_range);
+  const fixes: Record<string, string> = rolling
+    ? { BUDAT_F: rolling.from, BUDAT_T: rolling.to }
+    : {};
+  if (!/^\d{8}$/.test(fixes["BUDAT_F"] ?? current.BUDAT_F ?? "")) fixes["BUDAT_F"] = toSapDate(isoDaysAgo(7));
+  if (!/^\d{8}$/.test(fixes["BUDAT_T"] ?? current.BUDAT_T ?? "")) fixes["BUDAT_T"] = toSapDate(isoDaysAgo(0));
+  if (!Object.keys(fixes).length) return input;
+  const nextPayload: Record<string, string> = { ...payload, ...current, ...fixes };
+
+  return {
+    ...input,
+    body_template: JSON.stringify(nextPayload, null, 2),
+    headers: input.headers,
+  };
+}
+
+
+function StatusPill({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+        ok ? "bg-emerald-50 text-emerald-700" : "bg-muted text-muted-foreground"
+      }`}
+    >
+      <ShieldCheck className="size-3" /> {label}
+    </span>
+  );
+}
+
+/* ---------------------------------- APIs ---------------------------------- */
+
+/** Truthful outcome of the newest run for an endpoint (scheduled or manual). */
+function LastRunLine({
+  run,
+}: {
+  run:
+    | undefined
+    | {
+    status: string;
+    started_at: string;
+    records_received: number;
+    records_stored: number;
+    records_replaced: number;
+    error_message: string | null;
+  };
+}) {
+  if (!run) {
+    return <p className="mt-2 text-xs text-muted-foreground">No sync run recorded yet</p>;
+  }
+  const ok = run.status === "success";
+  const when = formatDateTimeISTLabel(run.started_at);
+  return (
+    <div
+      className={`mt-2 rounded-md border px-2 py-1.5 text-xs ${
+        ok
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+          : run.status === "skipped"
+            ? "border-amber-200 bg-amber-50 text-amber-800"
+            : "border-destructive/30 bg-destructive/5 text-destructive"
+      }`}
+    >
+      <span className="font-semibold">
+        {ok ? "Success" : run.status === "skipped" ? "Skipped" : "Failed"} — {when}
+      </span>
+      <span className="ml-1">
+        {ok
+          ? `${run.records_received} received (${run.records_stored} stored, ${run.records_replaced} replaced)`
+          : (run.error_message ?? "")}
+      </span>
+    </div>
+  );
+}
+
+
+function ApiList({
+  onNew,
+  onEdit,
+}: {
+  onNew: () => void;
+  onEdit: (value: { id: string; input: EndpointInput }) => void;
+}) {
+  const queryClient = useQueryClient();
+  const endpointsQuery = useQuery({ queryKey: ["sap-endpoints"], queryFn: listSapEndpoints });
+  const systemsQuery = useQuery({ queryKey: ["sap-systems"], queryFn: listSapSystems });
+  const runsQuery = useQuery({
+    queryKey: ["sync-runs-latest"],
+    queryFn: listLatestRuns,
+    refetchInterval: 60000,
+  });
+  const systems = systemsQuery.data ?? [];
+  const latestRuns = runsQuery.data ?? {};
+
+  const testMutation = useMutation({
+    mutationFn: (endpoint: SapEndpoint) => testSapEndpoint(endpoint, systems),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["sap-endpoints"] });
+      queryClient.invalidateQueries({ queryKey: ["middleware-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["sync-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["sync-runs-latest"] });
+      reportTest(result);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteSapEndpoint,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sap-endpoints"] });
+      toast.success("Endpoint deleted");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  if (endpointsQuery.isLoading) return <Skeleton className="h-56 w-full" />;
+  const endpoints = endpointsQuery.data ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button onClick={onNew} className="gap-2">
+          <Plus className="size-4" /> New endpoint
+        </Button>
+      </div>
+
+      {endpoints.length === 0 ? (
+        <p className="rounded-md border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+          No endpoints registered yet. Create one to connect a report to SAP.
+        </p>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {endpoints.map((endpoint) => (
+            <article
+              key={endpoint.id}
+              className="rounded-md border border-border bg-card p-4 shadow-tile"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-sm font-semibold text-card-foreground">{endpoint.name}</h3>
+                <div className="flex flex-col items-end gap-1">
+                  <Badge variant="outline">{endpoint.auth_type}</Badge>
+                </div>
+              </div>
+              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                {endpoint.description || "—"}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <StatusPill ok={endpoint.is_active} label={endpoint.is_active ? "Active" : "Inactive"} />
+                <span>
+                  {endpoint.last_synced_at
+                    ? `Last data ${formatDateTimeISTLabel(endpoint.last_synced_at)}`
+                    : "No data synced yet"}
+                </span>
+              </div>
+              <LastRunLine run={latestRuns[endpoint.name]} />
+
+              <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => onEdit({ id: endpoint.id, input: toInput(endpoint) })}
+                  >
+                    <Pencil className="size-3.5" /> Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    disabled={testMutation.isPending}
+                    onClick={() => testMutation.mutate(endpoint)}
+                  >
+                    <Activity className="size-3.5" /> Test
+                  </Button>
+                </div>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="text-destructive"
+                  onClick={() => deleteMutation.mutate(endpoint.id)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+              <p className="mt-2 truncate text-[11px] text-muted-foreground">
+                {resolveEndpointUrl(endpoint, systems)}
+              </p>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KeyValueRows({
+  rows,
+  onChange,
+  keyLabel,
+}: {
+  rows: KeyValue[];
+  onChange: (rows: KeyValue[]) => void;
+  keyLabel: string;
+}) {
+  return (
+    <div className="space-y-2">
+      {rows.map((row, index) => (
+        <div key={index} className="flex gap-2">
+          <Input
+            placeholder={keyLabel}
+            value={row.key}
+            onChange={(e) =>
+              onChange(rows.map((r, i) => (i === index ? { ...r, key: e.target.value } : r)))
+            }
+          />
+          <Input
+            placeholder="Value"
+            value={row.value}
+            onChange={(e) =>
+              onChange(rows.map((r, i) => (i === index ? { ...r, value: e.target.value } : r)))
+            }
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="text-destructive"
+            onClick={() => onChange(rows.filter((_, i) => i !== index))}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="gap-1"
+        onClick={() => onChange([...rows, { key: "", value: "" }])}
+      >
+        <Plus className="size-3.5" /> Add row
+      </Button>
+    </div>
+  );
+}
+
+/** Pick a .json file and load its contents into the request payload editor. */
+function PayloadFileInput({ onLoad }: { onLoad: (raw: string) => void }) {
+  const [error, setError] = useState("");
+
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="file"
+          accept="application/json,.json"
+          className="h-9 max-w-xs cursor-pointer text-xs"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            const raw = await file.text();
+            const parsed = parsePayload(raw);
+            if (!parsed) {
+              setError("That is not a valid JSON object — nothing was changed.");
+              return;
+            }
+            setError("");
+            onLoad(JSON.stringify(parsed, null, 2));
+            toast.success(`Loaded ${Object.keys(parsed).length} field(s) into the request payload`);
+          }}
+        />
+        <span className="text-xs text-muted-foreground">Upload a .json payload file</span>
+      </div>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+
+function EndpointDetail({
+
+  id,
+  input,
+  onClose,
+}: {
+  id: string | null;
+  input: EndpointInput;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<EndpointInput>(input);
+  const systemsQuery = useQuery({ queryKey: ["sap-systems"], queryFn: listSapSystems });
+  const endpointsQuery = useQuery({ queryKey: ["sap-endpoints"], queryFn: listSapEndpoints });
+  const systems = systemsQuery.data ?? [];
+  const stored = useMemo(
+    () => (endpointsQuery.data ?? []).find((row) => row.id === id) ?? null,
+    [endpointsQuery.data, id],
+  );
+
+  const payload = useMemo(() => parsePayload(form.body_template), [form.body_template]);
+  const isOpenSalesOrders = isOpenSalesOrdersEndpoint(form.name);
+  const isOrderBook =
+    isOrderBookName(form.name) ||
+    isOrderBookName(form.endpoint_path) ||
+    (!!payload && "ERDAT_F" in payload && "ERDAT_T" in payload);
+  const isZcash = !isOrderBook && (isZcashFlowName(form.name) || isZcashFlowName(form.endpoint_path));
+  const isSit = isSitEndpoint(form.name) || isSitEndpoint(form.endpoint_path);
+  const isDpr = isDailyProductionEndpoint(form.name) || isDailyProductionEndpoint(form.endpoint_path);
+  const usesPostingDates =
+    isDpr || isOpenPoEndpoint(form.name) || isOpenPoEndpoint(form.endpoint_path) ||
+    isPurchaseOrdersEndpoint(form.name) || isPurchaseOrdersEndpoint(form.endpoint_path) ||
+    form.posting_range !== "custom" || !!payload?.["BUDAT_F"] || !!payload?.["BUDAT_T"];
+  const usesPayloadFields = !isZcash && !isOpenSalesOrders && (isOrderBook || isSit || /salesregister/i.test(`${form.name}${form.endpoint_path}`.replace(/[^a-z0-9]/gi, "")) || !usesPostingDates);
+  const requestDate = dateFromSapValue(payload?.["fkdat"] ?? "") ?? new Date();
+  const payloadInvalid = form.body_template.trim().length > 0 && payload === null;
+
+  function payloadValue(key: string): string {
+    return payload?.[key] ?? form.headers.find((row) => row.key === key)?.value ?? "";
+  }
+
+  function updateOpenSalesOrdersDate(date: Date | undefined) {
+    if (!date) return;
+    if (parsePayload(form.body_template) === null) {
+      toast.error("Correct the request payload JSON before changing the Request Date");
+      return;
+    }
+    applyPayloadValues({ fkdat: sapValueFromDate(date) });
+  }
+
+  /** Write values into both the payload body and the matching header rows. */
+  function applyPayloadValues(values: Record<string, string>) {
+    setForm((prev) => {
+      // Preserve nested objects (e.g. DOCUMENT_DATE) instead of flattening them to strings.
+      const nextText = setPayloadPaths(prev.body_template, values);
+      if (nextText === null) return prev;
+      return { ...prev, body_template: nextText, headers: prev.headers };
+    });
+  }
+
+  const isZme2n = isPurchaseOrdersEndpoint(form.name) || isPurchaseOrdersEndpoint(form.endpoint_path);
+  const isOpenPo = isZme2n || isOpenPoEndpoint(form.name) || isOpenPoEndpoint(form.endpoint_path);
+  const isPoList = isZme2n && /BEDAT_FROM/i.test(form.body_template ?? "");
+  const dateFromKey = isDpr ? "FROMDT" : isPoList ? "BEDAT_FROM" : isZme2n ? "document_date.from_date" : isOpenPo ? "DOCUMENT_DATE.FROM_DATE" : "BUDAT_F";
+  const dateToKey = isDpr ? "TODT" : isPoList ? "BEDAT_TO" : isZme2n ? "document_date.to_date" : isOpenPo ? "DOCUMENT_DATE.TO_DATE" : "BUDAT_T";
+  const dateWord = isOpenPo ? "Document" : "Posting";
+  function dateValue(path: string): string {
+    return path.includes(".") ? getPayloadPath(form.body_template, path) : payloadValue(path);
+  }
+
+  function set<K extends keyof EndpointInput>(key: K, value: EndpointInput[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      assertZcashRequired(form.name, form.endpoint_path, form.body_template);
+      return id ? updateSapEndpoint(id, form) : createSapEndpoint(form);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sap-endpoints"] });
+      toast.success(id ? "Endpoint updated" : "Endpoint created");
+      onClose();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const [lastTest, setLastTest] = useState<TestResult | null>(null);
+
+  const testMutation = useMutation({
+    mutationFn: async () => {
+      if (!stored) throw new Error("Save the endpoint before testing it");
+      assertZcashRequired(form.name, form.endpoint_path, form.body_template);
+      return testSapEndpoint(stored, systems);
+    },
+    onSuccess: (result) => {
+      setLastTest(result);
+      queryClient.invalidateQueries({ queryKey: ["sap-endpoints"] });
+      queryClient.invalidateQueries({ queryKey: ["middleware-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["sync-runs"] });
+
+      reportTest(result);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const pingMutation = useMutation({
+    mutationFn: async () => {
+      const selectedSystem =
+        systems.find((system) => system.key === form.system_key) ??
+        systems.find((system) => system.is_active) ??
+        null;
+      return pingSapHost(selectedSystem);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["middleware-logs"] });
+      result.ok ? toast.success(result.message) : toast.error(result.message);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <Button variant="outline" className="gap-1" onClick={onClose}>
+            <ArrowLeft className="size-4" /> Back
+          </Button>
+          <div>
+            <h2 className="text-2xl font-light text-foreground">{form.name || "New endpoint"}</h2>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="gap-2"
+            disabled={pingMutation.isPending}
+            onClick={() => pingMutation.mutate()}
+          >
+            <Radio className="size-4" /> Ping SAP host
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            disabled={testMutation.isPending}
+            onClick={() => testMutation.mutate()}
+          >
+            <Activity className="size-4" /> Test connection
+          </Button>
+          <Button className="gap-2" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+            <Save className="size-4" /> Save
+          </Button>
+        </div>
+
+      </div>
+
+      <Tabs defaultValue="details" className="space-y-4">
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="details">Details</TabsTrigger>
+          <TabsTrigger value="request">Request</TabsTrigger>
+          <TabsTrigger value="response">Response</TabsTrigger>
+          
+          <TabsTrigger value="scheduler">Scheduler</TabsTrigger>
+          <TabsTrigger value="connectivity">Connectivity</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="details">
+          <div className="grid gap-4 rounded-md border border-border bg-card p-5 shadow-tile md:grid-cols-2">
+            <Field label="Name">
+              <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
+            </Field>
+            <Field label="Description" className="md:col-span-2">
+              <Textarea
+                rows={3}
+                value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+              />
+            </Field>
+            <Field
+              label="Endpoint Path or URL"
+              className="md:col-span-2"
+              hint="Use a relative path (starting with /) to inherit the host from the selected SAP system — the SAP client is appended automatically. A full http(s):// URL is also accepted."
+            >
+              <Input
+                value={form.endpoint_path}
+                placeholder="/sap/opu/odata/sap/ZFISALES_SRV/Items"
+                onChange={(e) => set("endpoint_path", e.target.value)}
+              />
+            </Field>
+            <Field label="SAP system">
+              <Select
+                value={form.system_key || "__active"}
+                onValueChange={(v) => set("system_key", v === "__active" ? "" : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__active">Use active system</SelectItem>
+                  {systems.map((system) => (
+                    <SelectItem key={system.key} value={system.key}>
+                      {system.label} ({system.environment})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="HTTP method">
+              <Select value={form.http_method} onValueChange={(v) => set("http_method", v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {HTTP_METHODS.map((method) => (
+                    <SelectItem key={method} value={method}>
+                      {method}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Auth type">
+              <Select value={form.auth_type} onValueChange={(v) => set("auth_type", v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AUTH_TYPES.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <div className="flex items-center gap-3 pt-6">
+              <Switch checked={form.is_active} onCheckedChange={(v) => set("is_active", v)} />
+              <Label>Active</Label>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="request">
+          <div className="space-y-5 rounded-md border border-border bg-card p-5 shadow-tile">
+            {usesPayloadFields ? (
+              <PayloadRequestFields
+                value={form.body_template}
+                range={form.posting_range}
+                onChange={(v) => set("body_template", v)}
+                onRange={(r) => set("posting_range", r as EndpointInput["posting_range"])}
+              />
+            ) : null}
+            {isZcash ? (
+              <ZcashFlowRequestFields value={form.body_template} onChange={(v) => set("body_template", v)} />
+            ) : null}
+            {!isZcash && !usesPayloadFields && (isOpenSalesOrders || usesPostingDates) ? (
+            <div className="grid gap-4 md:grid-cols-3">
+              {isOpenSalesOrders ? (
+                <Field label="Request Date" hint="Sent as fkdat (YYYYMMDD).">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        aria-label="Request Date"
+                        className="w-full justify-start text-left font-normal"
+                      >
+                        <CalendarIcon className="size-4" />
+                        {format(requestDate, "dd-MM-yyyy")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={requestDate}
+                        onSelect={updateOpenSalesOrdersDate}
+                        initialFocus
+                        className={cn("pointer-events-auto p-3")}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </Field>
+              ) : (
+                <>
+              <Field
+                label={`${dateWord} date range`}
+                hint="Preset windows follow today on every sync; custom dates stay fixed."
+              >
+                <Select
+                  value={form.posting_range}
+                  onValueChange={(value) => {
+                    const range = value as EndpointInput["posting_range"];
+                    set("posting_range", range);
+                    const rolling = postingWindow(range);
+                    if (rolling) applyPayloadValues(isDpr ? { FROMDT: dprIso(rolling.from), TODT: dprIso(rolling.to) } : { [dateFromKey]: isOpenPo && !isPoList && range === "today" ? "" : rolling.from, [dateToKey]: rolling.to });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {POSTING_RANGES.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label={`${dateWord} From Date`} hint={`Sent as ${dateFromKey} (${isDpr ? "YYYY-MM-DD" : "YYYYMMDD"}).`}>
+                <Input
+                  type="date"
+                  value={isDpr ? dateValue(dateFromKey) : fromSapDate(dateValue(dateFromKey))}
+                  onChange={(e) => {
+                    set("posting_range", "custom");
+                    applyPayloadValues({ [dateFromKey]: isDpr ? e.target.value : toSapDate(e.target.value) });
+                  }}
+                />
+              </Field>
+              <Field label={`${dateWord} To Date`} hint={`Sent as ${dateToKey} (${isDpr ? "YYYY-MM-DD" : "YYYYMMDD"}).`}>
+                <Input
+                  type="date"
+                  value={isDpr ? dateValue(dateToKey) : fromSapDate(dateValue(dateToKey))}
+                  onChange={(e) => {
+                    set("posting_range", "custom");
+                    applyPayloadValues({ [dateToKey]: isDpr ? e.target.value : toSapDate(e.target.value) });
+                  }}
+                />
+              </Field>
+                </>
+              )}
+            </div>
+            ) : null}
+
+            <Field label="Headers" hint="Optional HTTP headers sent with the request.">
+              <KeyValueRows rows={form.headers} keyLabel="Header" onChange={(rows) => set("headers", rows)} />
+            </Field>
+
+            <Field
+              label="Request payload"
+              hint={
+                isZcash
+                  ? "Sent as the request body exactly as saved. Stays in sync with the fields above."
+                  : isOpenSalesOrders
+                  ? "Sent as the request body. fkdat stays in sync with the Request Date above."
+                  : isOpenPo
+                  ? "Sent as the request body. DOCUMENT_DATE stays in sync with the fields above."
+                  : usesPostingDates
+                  ? `Sent as the request body. ${isDpr ? "FROMDT / TODT stay" : "BUDAT_F / BUDAT_T stay"} in sync with the date pickers above.`
+                  : "Sent as the request body exactly as saved."
+              }
+            >
+              <Textarea
+                rows={10}
+                className="font-mono text-xs"
+                value={form.body_template}
+                onChange={(e) => set("body_template", e.target.value)}
+              />
+              {isOpenSalesOrders && payloadInvalid ? (
+                <p className="text-xs text-destructive">
+                  Request payload must be a valid JSON object before the Request Date can update fkdat.
+                </p>
+              ) : null}
+              <PayloadFileInput onLoad={(raw) => set("body_template", raw)} />
+            </Field>
+
+            <Field label="Query parameters">
+              <KeyValueRows
+                rows={form.query_params}
+                keyLabel="Parameter"
+                onChange={(rows) => set("query_params", rows)}
+              />
+            </Field>
+
+          </div>
+        </TabsContent>
+
+
+        <TabsContent value="response">
+          <div className="space-y-5 rounded-md border border-border bg-card p-5 shadow-tile">
+            <Field label="Records path" hint="Where the row array lives in the payload, e.g. d.results.">
+              <Input value={form.response_root} onChange={(e) => set("response_root", e.target.value)} />
+            </Field>
+            <Field label="Field mapping notes">
+              <Textarea
+                rows={4}
+                value={form.response_notes}
+                onChange={(e) => set("response_notes", e.target.value)}
+              />
+            </Field>
+            <Field label="Sample response (last test)">
+              <pre className="max-h-64 overflow-auto rounded-sm bg-muted p-3 text-xs">
+                {stored?.sample_response || "No response captured yet — run Test connection."}
+              </pre>
+            </Field>
+          </div>
+        </TabsContent>
+
+
+        <TabsContent value="scheduler">
+          <div className="space-y-5 rounded-md border border-border bg-card p-5 shadow-tile">
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={form.scheduler_enabled}
+                onCheckedChange={(v) => set("scheduler_enabled", v)}
+              />
+              <Label>Enable scheduled sync</Label>
+            </div>
+            <DailySyncTimes
+              expression={form.schedule_expression}
+              onChange={(expression) => set("schedule_expression", expression)}
+            />
+            <SchedulePreview
+              expression={form.schedule_expression}
+              enabled={form.scheduler_enabled}
+            />
+            <p className="text-xs text-muted-foreground">
+              Last run:{" "}
+              {stored?.last_run_at ? formatDateTimeISTLabel(stored.last_run_at) : "never"} — status{" "}
+              {stored?.last_run_status ?? "—"}
+            </p>
+            {stored?.name ? <SchedulerHealth endpointName={stored.name} /> : null}
+          </div>
+
+        </TabsContent>
+
+        <TabsContent value="connectivity">
+          <div className="space-y-3 rounded-md border border-border bg-card p-5 text-sm shadow-tile">
+            <p className="text-muted-foreground">Resolved URL</p>
+            <p className="break-all font-mono text-xs text-card-foreground">
+              {resolveEndpointUrl(
+                { endpoint_path: form.endpoint_path, system_key: form.system_key || null },
+                systems,
+              )}
+            </p>
+            <p className="border-t border-border pt-3 text-muted-foreground">
+              SAP user:{" "}
+              <span className="font-medium text-card-foreground">
+                {(systems.find((s) => s.key === form.system_key) ?? systems.find((s) => s.is_active))
+                  ?.username ?? "not configured"}
+              </span>{" "}
+              — username and password are maintained per system in the SAP Systems tab.
+            </p>
+            <div className="grid gap-2 border-t border-border pt-3 md:grid-cols-3">
+              <Meta label="Last test" value={stored?.last_test_status ?? "—"} />
+              <Meta
+                label="Response time"
+                value={stored?.last_test_duration_ms ? `${stored.last_test_duration_ms} ms` : "—"}
+              />
+              <Meta label="Message" value={stored?.last_test_message ?? "—"} />
+            </div>
+
+            {lastTest?.request ? (
+              <div className="space-y-2 border-t border-border pt-3">
+                <p className="text-muted-foreground">
+                  Outbound request of the last test (also printed in the browser console)
+                </p>
+                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-[11px] text-muted-foreground">
+                  {JSON.stringify(lastTest.request, null, 2)}
+                </pre>
+              </div>
+            ) : null}
+
+            <MiddlewareActivity />
+
+          </div>
+
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  className = "",
+  hint,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+  hint?: string;
+}) {
+  return (
+    <div className={`space-y-1.5 ${className}`}>
+      <Label>{label}</Label>
+      {children}
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm text-card-foreground">{value}</p>
+    </div>
+  );
+}
+
+/* ------------------------------- SAP systems ------------------------------ */
+
+const emptySystem = {
+  key: "",
+  label: "",
+  environment: "DEV",
+  base_url: "",
+  sap_client: "",
+  username: "",
+  is_active: false,
+};
+
+function SystemsTab() {
+  const queryClient = useQueryClient();
+  const systemsQuery = useQuery({ queryKey: ["sap-systems"], queryFn: listSapSystems });
+  const middlewareStatusesQuery = useQuery({
+    queryKey: ["sap-middleware-system-statuses"],
+    queryFn: getMiddlewareSystemStatuses,
+    retry: false,
+  });
+  const [drafts, setDrafts] = useState<Record<string, typeof emptySystem>>({});
+  const [adding, setAdding] = useState<typeof emptySystem | null>(null);
+
+  function refresh() {
+    queryClient.invalidateQueries({ queryKey: ["sap-systems"] });
+    queryClient.invalidateQueries({ queryKey: ["sap-middleware-system-statuses"] });
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: ({ id, input }: { id: string | null; input: typeof emptySystem }) =>
+      saveSapSystem(id, input),
+    onSuccess: () => {
+      refresh();
+      setAdding(null);
+      toast.success("SAP connection saved");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteSapSystem,
+    onSuccess: () => {
+      refresh();
+      toast.success("System removed");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const testMutation = useMutation({
+    mutationFn: (system: SapSystem) => testSapSystem(system),
+    onSuccess: (result) => {
+      refresh();
+      result.ok ? toast.success("SAP reachable") : toast.error(`Test failed: ${result.message}`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  if (systemsQuery.isLoading) return <Skeleton className="h-56 w-full" />;
+  const systems = systemsQuery.data ?? [];
+
+  function draftFor(system: SapSystem) {
+    return (
+      drafts[system.id] ?? {
+        key: system.key,
+        label: system.label,
+        environment: system.environment,
+        base_url: system.base_url,
+        sap_client: system.sap_client ?? "",
+        username: system.username ?? "",
+        is_active: system.is_active,
+      }
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {systems.map((system) => {
+        const draft = draftFor(system);
+        const environmentKey =
+          draft.environment.toLowerCase() === "production" ? "prod" : draft.environment.toLowerCase();
+        const passwordConfigured =
+          middlewareStatusesQuery.data?.find((status) => status.key === environmentKey)?.credentials ?? false;
+        const insecureTls =
+          middlewareStatusesQuery.data?.find((status) => status.key === environmentKey)?.insecureTls ?? false;
+        return (
+          <section key={system.id} className="rounded-md border border-border bg-card p-5 shadow-tile">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2 text-base font-semibold text-card-foreground">
+                  <Database className="size-4" /> {system.label}
+                  {system.is_active ? <Badge variant="secondary">Active</Badge> : null}
+                </h3>
+                <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+                  Base URL, client and technical user for this SAP system. Endpoints that store a
+                  relative path inherit this Base URL automatically — switching DEV → Quality is a
+                  one-field change. Saved values take priority over middleware fallback values.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  disabled={testMutation.isPending}
+                  onClick={() => testMutation.mutate(system)}
+                >
+                  <Activity className="size-4" /> Test connection
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="text-destructive"
+                  onClick={() => deleteMutation.mutate(system.id)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            </div>
+            <SystemFields
+              value={draft}
+              passwordConfigured={passwordConfigured}
+              insecureTls={insecureTls}
+              passwordStatusLoading={middlewareStatusesQuery.isLoading}
+              onChange={(next) => setDrafts((prev) => ({ ...prev, [system.id]: next }))}
+            />
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Last test: {system.last_test_status ?? "—"}
+                {system.last_test_at ? ` · ${formatDateTimeISTLabel(system.last_test_at)}` : ""}
+              </p>
+              <Button
+                className="gap-2"
+                disabled={saveMutation.isPending}
+                onClick={() => saveMutation.mutate({ id: system.id, input: draft })}
+              >
+                <Save className="size-4" /> Save SAP connection
+              </Button>
+            </div>
+          </section>
+        );
+      })}
+
+      {systems.length === 0 && !adding ? (
+        <p className="rounded-md border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+          No SAP system configured. Add a system to connect relative endpoint paths to SAP.
+        </p>
+      ) : null}
+
+      {adding ? (
+        <section className="rounded-md border border-border bg-card p-5 shadow-tile">
+          <h3 className="mb-4 text-base font-semibold text-card-foreground">New SAP system</h3>
+          <SystemFields value={adding} passwordConfigured={false} onChange={setAdding} />
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setAdding(null)}>
+              Cancel
+            </Button>
+            <Button
+              className="gap-2"
+              disabled={saveMutation.isPending}
+              onClick={() => saveMutation.mutate({ id: null, input: adding })}
+            >
+              <Save className="size-4" /> Save SAP connection
+            </Button>
+          </div>
+        </section>
+      ) : (
+        <Button variant="outline" className="gap-2" onClick={() => setAdding({ ...emptySystem })}>
+          <Plus className="size-4" /> Add another system
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function SystemFields({
+  value,
+  passwordConfigured,
+  insecureTls = false,
+  passwordStatusLoading = false,
+  onChange,
+}: {
+  value: typeof emptySystem;
+  passwordConfigured: boolean;
+  insecureTls?: boolean;
+  passwordStatusLoading?: boolean;
+  onChange: (next: typeof emptySystem) => void;
+}) {
+  function set<K extends keyof typeof emptySystem>(key: K, next: (typeof emptySystem)[K]) {
+    onChange({ ...value, [key]: next });
+  }
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <Field label="Label">
+        <Input value={value.label} onChange={(e) => set("label", e.target.value)} />
+      </Field>
+      <Field label="Environment">
+        <Select value={value.environment} onValueChange={(v) => set("environment", v)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ENVIRONMENTS.map((env) => (
+              <SelectItem key={env} value={env}>
+                {env}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field label="SAP Base URL">
+        <Input
+          value={value.base_url}
+          placeholder="http://10.200.1.2:8000"
+          onChange={(e) => set("base_url", e.target.value)}
+        />
+      </Field>
+      <Field label="SAP client">
+        <Input value={value.sap_client} placeholder="100" onChange={(e) => set("sap_client", e.target.value)} />
+      </Field>
+      <Field label="SAP username">
+        <Input value={value.username} onChange={(e) => set("username", e.target.value)} />
+      </Field>
+      <Field label="SAP password">
+        <div className="space-y-1">
+          <Input
+            type="password"
+            value={passwordConfigured ? "********" : ""}
+            placeholder={passwordStatusLoading ? "Checking middleware…" : "Not configured in middleware"}
+            readOnly
+            aria-label="SAP password configuration status"
+          />
+          <p className="text-xs text-muted-foreground">
+            {passwordStatusLoading
+              ? "Checking middleware configuration…"
+              : passwordConfigured
+                ? "Configured in middleware"
+                : "Not configured in middleware"}
+          </p>
+        </div>
+      </Field>
+      <div className="flex items-center gap-3">
+        <Switch checked={value.is_active} onCheckedChange={(v) => set("is_active", v)} />
+        <Label>Use as active system</Label>
+      </div>
+      {insecureTls ? (
+        <div className="flex items-start gap-2 rounded-sm border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive md:col-span-2">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <p>HTTPS certificate verification is disabled for this environment. Use this only temporarily on a trusted internal network.</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------- middleware ------------------------------ */
+
+type MiddlewareForm = {
+  connection_mode: string;
+  deployment_mode: string;
+  middleware_port: number;
+  middleware_url: string;
+  proxy_secret: string;
+};
+
+function MiddlewareTab() {
+  const queryClient = useQueryClient();
+  const configQuery = useQuery({ queryKey: ["sap-middleware"], queryFn: getMiddlewareConfig });
+  const [form, setForm] = useState<MiddlewareForm | null>(null);
+
+  const current =
+    form ??
+    (configQuery.data
+      ? {
+          connection_mode: configQuery.data.connection_mode,
+          deployment_mode: configQuery.data.deployment_mode,
+          middleware_port: configQuery.data.middleware_port,
+          middleware_url: configQuery.data.middleware_url,
+          proxy_secret: "",
+        }
+      : null);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!configQuery.data || !current) throw new Error("Configuration not loaded");
+      return saveMiddlewareConfig(configQuery.data.id, current);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sap-middleware"] });
+      setForm((prev) => (prev ? { ...prev, proxy_secret: "" } : prev));
+      toast.success("Middleware settings saved");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const testMutation = useMutation({
+    mutationFn: testMiddleware,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["sap-middleware"] });
+      result.ok
+        ? toast.success(`Middleware reachable (${result.durationMs} ms)`)
+        : toast.error(`Middleware test failed: ${result.message}`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  if (!current) return <Skeleton className="h-56 w-full" />;
+
+  const active: MiddlewareForm = current;
+  function set<K extends keyof MiddlewareForm>(key: K, value: MiddlewareForm[K]) {
+    setForm({ ...active, [key]: value });
+  }
+
+  return (
+    <section className="rounded-md border border-border bg-card p-5 shadow-tile">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-base font-semibold text-card-foreground">
+            <Server className="size-4" /> Node.js Middleware
+          </h3>
+          <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+            These settings are shared by every SAP API integration whose auth type is Basic or Proxy /
+             Middleware. The portal server authenticates to this service with a protected shared secret before calling SAP.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          className="gap-2"
+          disabled={testMutation.isPending}
+          onClick={() => testMutation.mutate()}
+        >
+          <Activity className="size-4" /> Test middleware
+        </Button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label="Connection mode">
+          <Select value={current.connection_mode} onValueChange={(v) => set("connection_mode", v)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CONNECTION_MODES.map((mode) => (
+                <SelectItem key={mode.value} value={mode.value}>
+                  {mode.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Deployment mode">
+          <Select value={current.deployment_mode} onValueChange={(v) => set("deployment_mode", v)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DEPLOYMENT_MODES.map((mode) => (
+                <SelectItem key={mode.value} value={mode.value}>
+                  {mode.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Middleware port">
+          <Input
+            type="number"
+            value={current.middleware_port}
+            onChange={(e) => set("middleware_port", Number(e.target.value) || 0)}
+          />
+        </Field>
+        <Field label="Node.js middleware URL">
+          <Input
+            value={current.middleware_url}
+            placeholder="http://10.200.1.5:3008"
+            onChange={(e) => set("middleware_url", e.target.value)}
+          />
+        </Field>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Last test: {configQuery.data?.last_test_status ?? "—"}
+          {configQuery.data?.last_test_at
+            ? ` · ${formatDateTimeISTLabel(configQuery.data.last_test_at)}`
+            : ""}
+          {configQuery.data?.last_test_message ? ` · ${configQuery.data.last_test_message}` : ""}
+        </p>
+        <Button className="gap-2" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+          <Save className="size-4" /> Save middleware settings
+        </Button>
+      </div>
+    </section>
+  );
+}

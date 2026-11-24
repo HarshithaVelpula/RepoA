@@ -1,0 +1,20 @@
+{
+  "name": "mis-sap-middleware",
+  "version": "1.8.0",
+  "private": true,
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "build:sync-core": "esbuild src/sync-core.entry.ts --bundle --format=esm --platform=node --target=node18 --define:import.meta.env={} --outfile=sync-core.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.58.0",
+    "express": "^4.21.2",
+    "undici": "^6.21.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

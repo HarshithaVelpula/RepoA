@@ -1,0 +1,212 @@
+- [x] Switch Open Value to typed P_VALUE1, backfill raw responses, mirror migration and rebuild middleware; verified 40 rows / 3.861528798 Cr in signed-in report, launchpad and Excel, five-page PDF, 31 passing tests and clean preview.
+- [ ] Quality/Production: operator must apply P_VALUE1 migration, deploy app/middleware and restart middleware; no remote access available here.
+- [x] Switch all Open Value displays to typed B_VALUE, backfill saved SAP rows, retain KWERT_INR, mirror migration and rebuild middleware; verified 40-row 2.286261413 Cr report/launchpad/Excel, fresh PDF, 24 passing tests and clean preview. Self-hosted Quality/Production deployment requires operator.
+- [x] Reverse LD colors, rank document descriptions by value, and pair default Top 10 zone/plant charts with explicit-filter expansion; 16 tests pass, signed-in 40-row charts verified at 951/1280/768/390px, Sales Zone selection/Reset verified, five-page PDF with red Y/green N checked, preview build clean.
+- [x] Match the TBN dashboard to the supplied compact CFO management layout using source-backed measures only
+- [x] Remove the TBN AI assistant and its dashboard action
+- [x] Add chart data-point drill-downs showing the exact contributing TBN GL entries
+- [x] Add a temporary multi-thread TBN Finance Assistant grounded in the current filtered dashboard, secured by TBN access and powered through Lovable AI Gateway.
+- [x] Make TBN chart value labels responsive, suppress zero-label clutter, and prevent collisions in dense small-screen charts.
+# Roadmap
+
+- [x] Build the reference-matched Cash Flow sample dashboard; verified Financial Accounting navigation, filters, monthly/quarterly charts, history, table search/pagination, complete 12-row filtered Excel, light/dark layouts at 1280/951/768/390px, six passing calculation tests and clean preview.
+
+- [x] Added filtered LD Status Y/N fourth desktop chart and separate PDF block; all-active launchpad totals without FY caption. Verified 951/1280/768/390px without overflow, 1,174 lines/₹279.53 Cr, 18 passing tests, fresh five-page PDF, and clean preview.
+
+- [x] Store KWERT_INR and exact LD_STATUS N/Y; switched report/launchpad values, updated three-record/124-key SAP sample, deprecated absent VKORG, mirrored migration, rebuilt middleware, provided cleanup/deployment files, and verified empty report with no runtime errors and 31 passing tests. Fresh live amounts/status await user-run SAP sync; self-hosted deployment awaits operator.
+
+- [x] Move Customer to the second desktop filter row and align Date Range with the other controls; verified both date modes, equal control alignment at 901/1280px, tablet/phone layouts at 768/390/320px, no overflow and clean preview.
+
+- [x] Remove Distribution Channel dropdown and hidden channel restrictions; verified seven filters, description-only table cells, unchanged 1,174/859 totals, date modes/Reset, Excel/PDF downloads, 15 passing tests and no overflow at 901/390/320px.
+
+- [x] Add Distribution Channel filters/table/Excel, reorder Smart Filters, dotted dates and Single/From–To modes; verified channel options, date-mode switching, 22-row filtered Excel/PDF, Reset to 1,174 rows, shared mapper, 27 passing tests, clean preview and no overflow at 901/390/320px.
+
+- [x] Remove default Open Orders dates; verified independent From/To, Clear/Reset, three summary tiles, descending creation-date details/1,174-row Excel, four-page PDF without Open Quantity or sync metadata, no overflow at 900/390/320px, 17 passing tests, and clean preview.
+
+- [x] Keep Last synced screen-only during Open Orders PDF generation; unmounted screen header during capture, visually checked all four fresh pages with no sync labels or clipping, confirmed successful download and clean preview.
+
+- [x] Remove Open Orders period beside Refresh; preserved filter logic and period-free PDF header, verified header at 901/390/320px without overflow, successful PDF download, no runtime errors and clean preview.
+
+- [x] Add Open Sales Orders launchpad description bars with count/value; verified 314 lines/₹51.65 Cr, description totals, both modes at 1280/901/768/390/320px, details link, eight tests and clean preview.
+
+- [x] Align Open Orders creation-date label, current-FY opening/Reset and launchpad; verified 314 lines/₹51.65 Cr, IST successful-sync display (Net Sales unavailable without a successful run), Clear/Reset, phone layout, Excel, four PDF pages with no sync labels or clipping, 18 tests and clean preview.
+
+- [x] Include Plant-wise Pending in PDF and verify screen-matching colors in both modes; checked all four pages, unchanged 1,174/859 counts and six passing tests.
+
+- [x] Add and verify persistent portal-wide light/dark mode with a top-bar switch, readable charts, and unchanged exports.
+
+- [x] Keep both overview donuts left with breakdown tables right and local overflow, preserve the three-card desktop row, and put Sales Zone and Plant-wise Pending in separate full-width rows; verified 949/1280/390/320px, unchanged 1,174/859 counts, PDF/Excel downloads, 13 tests and clean preview.
+
+- [x] Show SAP document code/description combinations in Open Orders filters and descriptions in the card; verified seven-row exact selection/Excel, Reset to 1,174 rows and 859 AH lines, PDF, mobile and 13 tests.
+
+- [x] Treemap: uniform equal-size grid tiles, centered name/amount/%, keep drill-down
+- [x] Top customers: show 6, tighter bar rows
+- [x] Sales by Segment donut: show 6 segments
+- [x] Replace Management Alerts with filter-aware posting comparisons
+- [x] Add a self-hosted existing-user password/profile/role repair script
+- [x] Static build: route SAP middleware calls through the /sap-mw Nginx bridge (fixes 405 on Quality)
+- [x] Static SAP sync: preserve request dates, securely record run history, avoid oversized key lookups, and report row counts
+- [x] Self-hosted: run the SAP sync scheduler inside the middleware (dynamic config, run history, manual trigger)
+- [x] Production in-place upgrade package: post-24-Aug migrations, Quality data copy, frontend, middleware, PM2, and Nginx
+- [x] Replace public Demo access with protected Admin test login from User Management
+- [x] Prevent SAP API Settings crashes from empty/invalid systems and clarify configuration ownership
+- [x] Show middleware-only SAP password status and use UI-first connection settings with `.env` fallback
+- [x] Support SAP over HTTP and securely trusted private-certificate HTTPS in all middleware request paths
+- [x] Make Quality middleware load SAP passwords past blank PM2 variables and report exact key-specific settings
+- [x] Make SAP password and HTTPS CA selection follow the visible SAP Systems Environment
+- [x] Add separate temporary insecure HTTPS switches for DEV, Quality, and Production SAP environments
+- [x] Preserve every received SAP sales occurrence with scoped snapshot replacement and reconciled sync counts
+- [x] Add the reference-matched Open Sales Orders sample dashboard and link its launchpad card
+- [x] Remove the nine retired procurement, controlling, quality, and project screens
+- [x] Remove Billed Revenue, Net Sales, Backorders, and Sales Trend launchpad cards
+- [x] Add module-level and child-screen role permissions with filtered launchpad cards
+- [x] Rename the Total Sales dashboard, place Sales Mix beside Pareto, map Profit Centre from ABTEI, and add April–March Year/Quarter filters
+- [x] Support multi-select Year and April–March Quarter filters across the Sales Dashboard and drill-downs
+- [x] Refresh launchpad cards and selected module tabs to match the supplied Fiori reference
+- [x] Recreate the full authenticated launchpad pixel-consciously from the supplied enterprise dashboard reference
+- [x] Equalize Sales cards, apply HBL MIS PORTAL branding, and show the latest Sales_Reports_KPI sync time
+- [x] Remove duplicate HBL header text and limit launchpad navigation to card action buttons
+- [x] Remove Fulfillment Rate and Billing Cleared from the Sales launchpad section
+- [x] Restore the compact Open Sales Orders report to the supplied reference layout
+- [x] Point the Open Sales Orders launchpad action to its dedicated screenshot-matched dashboard
+- [x] Map BSARK into NEW/REPL, add its dynamic Sales Dashboard chart, and remove the Management Dashboard shortcut
+- [x] Store Open_Sales_Orders in its own table with atomic VBELN + POSNR replacement and scheduled current-date `fkdat`
+- [x] Connect the Open Sales Orders dashboard to the verified live table
+- [x] Align Quality launchpad data with local by removing all retired modules and Sales cards
+- [x] Map SAP PCGRP1 into ZFISALES sub_group and backfill existing blank subgroup values
+- [x] Remove colored left borders from Sales Dashboard cards
+
+- [x] Build the 4+8 Main Group charts with complete PC Short Name drill-down, focused tooltips, Others paging, and separate table columns
+- [x] Tighten Sub Group spacing, retain every Sub Group, and enlarge tiny division hover targets
+- [x] Refine stacked chart spacing, tiny-slice tooltips, and complete wrapped division legend
+- [x] Add overflow-based horizontal scrolling for complete Main Group and Sub Group lists
+- [x] Add enlarged exact-segment pointer targets for tiny stacked chart slices
+- [x] Keep exact-segment tooltips inside the visible browser area
+- [x] Show exact tooltips for recorded zero-value PC Short Name divisions
+- [x] Remove false Sub Group colors, compact bars, label both axes, and restore amount-axis visibility
+- [x] Dynamically show every recorded Sub Group and PC Short Name pairing, including tiny and zero-value entries
+- [x] Keep every recorded division visible and hoverable, including ₹0, and remove chart tooltip percentages
+- [x] Give every recorded Sub Group division a separate visible stacked slice without changing actual values
+- [x] Assign dynamic unique PC Short Name colors and correct exact segment tooltip matching
+- [x] Show the top 10 individual customers with contribution and cumulative percentages in the Pareto card
+- [x] Align Total AH and AH Sales through one shared exported-row subset where Total AH is greater than zero
+- [x] Add Sales by Model amount and per-AH chart with Top 10/20/All controls and record-count tooltip
+- [x] Resize Total Sales to four columns and add an A4 landscape dashboard PDF excluding the Net Sales List
+- [x] Export every filtered Sales by Model row in the dashboard PDF regardless of the on-screen Top 10/20 limit
+- [x] Stabilize Sales Dashboard totals with active-only deterministic paging and completed-snapshot consistency checks
+- [x] Verify BELNR, GJAHR, HKONT, AUBEL, AUPOS, and POSNR persistence without dropping valid repeated SAP rows
+- [x] Refine Sales Dashboard titles and units, add filter-aware fiscal quarter comparison tiles, and clarify Main Group drill-down navigation
+- [x] Add date-aware QoQ/YoY quarter comparisons, sparklines, variance analysis, and live executive insights
+- [x] Align Sales tiles to April–March fiscal years, sequential quarter baselines, sales-type breakdowns, and admin-managed revenue targets
+- [x] Correct future and partial quarter states across tiles, trajectory analysis, and executive insights
+- [x] Cap the default Sales Dashboard at today so future postings cannot drive totals, Active quarters, or comparisons
+- [x] Restyle Management Alerts like Executive Insights and explain each live, filter-driven alert basis
+- [x] Simplify the Sales Dashboard header and show the full ZFISALES available-data range
+- [x] Prevent the Quality Sales report crash by removing its unused Revenue Target request; retain the existing migration
+- [x] Remove the detailed variance report action and refine Smart Filters with restrained enterprise color
+- [x] Remove the currency and Crores suffix from Top 10 Customers values while retaining crore scaling
+- [x] Highlight the dynamic ZFISALES data range and simplify the Main Group and Sales Trend titles
+- [x] Create ZTBN in Tables Master with all 261 workbook fields and import all 796 supplied rows
+- [x] Add the missing ZTBN launchpad box under Tables Master and link it to `/tables/ztbn`
+- [x] Render every registered table card under Tables Master instead of limiting the section to one card
+- [x] Add a TBN tile under Financial Accounting with a searchable, paginated view of all ZTBN columns and values
+- [x] Turn TBN View Details into a live ZTBN management dashboard with GL and profit-centre drill-downs
+- [x] Keep the TBN dashboard synchronized in real time with every ZTBN data change
+- [x] Add shared Profit Centre, GL, balance-type, and amount filters across the live TBN dashboard
+- [x] Apply distinct semantic color across each full TBN summary card
+- [x] Extend the TBN semantic color system across charts, alerts, detail table, and GL detail view
+- [x] Export the current filtered TBN dashboard charts, alerts, and GL detail table as a shareable PDF
+- [x] Display compact amount labels directly on the TBN debit, credit, composition, and net-balance charts
+- [x] Remove Crore suffixes from Sales Dashboard values, hide zero-total quarters, and show monthly quarter bars with posting counts
+- [x] Show the quarter charts' crore-scaled amount axis and monthly values above bars instead of posting counts
+- [x] Add visible X/Y axis lines and Month/Amount labels to each Sales quarter chart
+- [x] Add dynamic intermediate Y-axis ticks and grouped monthly bars for two selected financial years
+- [x] Keep quarters visible when any selected fiscal year has data, leaving missing-year bars empty
+- [x] Hide monthly bar-top values for two-year quarter comparisons to prevent overlap
+- [x] Simplify quarter comparison visuals, export Top 10 Sales by Model, and align launchpad Net Sales to the current financial year
+- [x] Prevent quarter tooltips from clipping and use the latest selected year containing quarter data for card status
+- [x] Replace Leading Segment with Leading Main Group and add a monthly Revenue per AH detail popup
+- [x] Clarify Revenue per AH filter scope, select eligible months correctly, and add exact alert values with percentages
+- [x] Format Leading Main Group and Customer Concentration alert values in crores
+- [x] Compare Revenue per AH using the latest two Posting Date months in scope and show monthly sales in crores
+- [x] Remove the visible `Cr` suffix from Leading Main Group and Customer Concentration alerts
+- [x] Remove the visible `Cr` suffix from monthly Sales amounts in the Revenue per AH popup
+- [x] Refine the Sales Dashboard PDF with an HBL header, selected date range, and no filter controls
+- [x] Prevent Sales Dashboard PDF card clipping, repeat the logo and date range, and paginate all model rows
+- [x] Refactor the Sales Analytics PDF into branded, high-resolution, page-safe executive sections with page numbering
+- [x] Ensure every exported Sales by Model page renders its bars and values before PDF capture
+- [x] Default all Sales reporting screens and resets to the current April–March fiscal year
+- [x] Replace successful ZFISALES syncs by Posting Date range while preserving staged snapshot failure protection
+
+- [x] Keep Sales data stable across tab and screen navigation; refresh latest committed data only through the explicit Refresh button.
+- [x] Export only the currently selected Net Sales List columns to CSV, preserving visible order and all filtered rows.
+- [x] Let administrators select multiple daily SAP sync times in IST while preserving advanced schedules.
+- [x] Rebrand the Sales PDF header, rename Total Sales to Net Sales, and reorganize SD/FI screens with protected placeholders.
+- [x] Place Sales by Model beside a Top 10 Type-based Model Wise bar chart in equal desktop columns and include both in PDF export.
+- [x] Rename Model Wise to Model Wise Type with Top 10/20/All screen controls while keeping PDF export at Top 10.
+- [x] Replace the Sales PDF posting-date range with the selected April–March ending-year FY label.
+- [x] Remove the duplicate Sales PDF tabs and arrange six management charts as three two-column PDF rows.
+- [x] Align the Sales Dashboard title and boxed sales-type tabs in one PDF row without a lower divider.
+- [x] Replace Open Sales Orders posting-range controls with one editable Request Date mapped to `fkdat`, while scheduled runs use their current date.
+- [x] Rebuild Open Sales Orders to match the supplied four-KPI, aging, trend, zone, delivery-status, and Quick View dashboard.
+- [x] Restore the full six-control Smart Filters card and apply it across every Open Sales Orders metric and chart.
+- [x] Add document-type analysis and filtering, customer/product/model Top 10 cards, and a paginated Open Sales Orders detail table.
+- [x] Refine Open Sales Orders to seven business filters and clarify Sales Zone bars as order-line counts with quantity and value details.
+- [x] Add POSNR, Product, Product Description, full filtered Excel export, and branded filter-free PDF export to Open Sales Orders.
+- [x] Map Open Order Value from P_VALUE1, remove Average Days Open, and exclude the detailed table from PDF only.
+- [x] Show Open Orders and Partial Delivered as separate labeled bars in every Open Order Value Trend aging group.
+- [x] Place the Open Sales Orders PDF title on its own line between the repeating HBL header and summary tiles.
+- [x] Make Document Type multi-select with ZDOR, ZEOR, and ZSOR checked by default.
+- [x] Convert every Open Sales Orders list filter to checkbox multi-select while keeping non-document filters unrestricted by default.
+- [x] Replace the Open Sales Orders launchpad sample with a live current-financial-year count and latest update time.
+- [x] Show both the live Open Order Value and open order line count on the launchpad card.
+- [x] Add search to every Sales and Open Sales Orders dropdown, and make Year and Posting Dates reset each other.
+- [x] Arrange Open Sales Orders customer, product, and model rankings in equal 4 + 4 + 4 desktop columns; remove Sales Type and add source-backed labels plus Select All/Deselect All.
+- [x] Rename Open Sales Orders report, status and item labels; remove subtitle; show division descriptions and preserve ERDAT-based date filtering.
+- [x] Show Sales Zone order-line counts as vertical bars with names below and the numeric scale on the left, including all zones in PDF export.
+
+- [x] Compact Sales Zone bars and remove bar percentages; move the Open Orders/Partial Delivered/Quick View row immediately above the detailed table.
+- [x] Further reduce Sales Zone bar gaps and rotate zone names 45° on screen and in PDF; verify readable, unclipped labels.
+- [x] Remove up/down percentages and last-period captions from the three Open Sales Orders summary tiles on screen and in PDF.
+- [x] Match Quick View to three separate blue, yellow, and violet reference cards; verify screen and PDF.
+- [x] Extend Quick View header colors across each entire card body, preserving all content; verify screen, dark mode, and PDF.
+- [x] Add the reference grey Quick View header and white main values while retaining colored cards; verify screen and PDF.
+- [x] Make all Highest Value text and icons white and enclose the Quick View header and tiles in one border; verify screen and PDF.
+- [x] Add detailed-table Status and column search filters, export all matching rows, and move pagination below-left; verify filtering and download.
+- [x] Strengthen the three Open Sales Orders summary backgrounds to light 15% tints; verify screen and PDF.
+- [x] Compact Open Sales Orders while retaining every section and readable charts; verify screen and PDF.
+- [x] Apply Net Sales-style row tints by Sales Document Type to the Open Sales Orders table.
+- [x] Deliver an image reference of the actual compact dashboard.
+- [x] Place the Sales Document Type donut left and breakdown table right with readable center text; verify screen and PDF.
+- [x] Reduce Open Orders, Partial Delivered Orders, and Quick View screen-only spacing; verify readable content and unchanged PDF.
+- [x] Add filtered Count and Open Value to both order-status cards; verify reconciliation, empty filters, screen, and PDF.
+- [x] Give Customer/Product/Model ranking bars distinct colors and add header dividers to the six requested charts; verify screen and PDF.
+- [x] Add colored heading borders including Sales Zone, radiant fills to the three upper charts, and a clearly visible Reset button; verify screen and PDF.
+- [x] Add Date Range Clear and readable one-row/two-row Open Sales Orders Smart Filters; verify interaction and layout.
+- [x] Verify mutually exclusive Financial Year and Date Range selections, including cleared year checkboxes.
+
+- [x] Remove Highest Quantity on screen/PDF and add shared Plant filtering, detailed-table column/search, and verify existing Excel Plant columns.
+- [x] Complete AH and Total AH storage/backfill, future SAP mapping, detailed table/search, Excel, middleware bundle, and verification; document separate Quality/Production deployment.
+- [x] Add a screen-only Plant-wise Pending tile with filtered value, quantity, and line count; verify totals, Plant selection/empty/reset, and wide/narrow layout.
+- [x] Match Plant-wise Pending to grouped normalized bars and add five full-filtered table totals; verified filters, empty results, pagination, tooltips, wide/narrow layout, and focused tests.
+- [x] Replace Plant-wise Pending percentage ticks with clearly distinguished actual-value scales; verified actual axes, unchanged totals, wide/narrow rendering, and eight focused tests.
+- [x] Compact Plant-wise Pending without horizontal scrolling using value bars/count line and visible axes; verified all ten matching plants, quantity tooltips, unchanged totals, desktop/901px/wrapped mobile layouts, and eight tests.
+- [x] Apply denser dashboard, radiant plant/zone bars, no plant count line, paired charts; verified controls, exports, totals, and layouts.
+
+- [x] Keep every zone and plant in one chart row; tightened plant gaps/right whitespace; verified all 19 zones/10 plants, totals, pagination/search, Excel/PDF, and desktop/phone layouts.
+- [x] Add Pending Orders Against AH beside Open Quantity; verified 130 distinct filtered orders, screen/PDF, narrow layouts, nine tests, and unchanged Quick View.
+- [x] Remove Open Orders Financial Year; verified all-date opening/Reset, 358 distinct AH orders, 1,174 Excel rows, PDF, narrow layouts, and 13 tests.
+- [x] Change Pending Orders Against AH to count every qualifying line with Total AH > 0; verified 859 on screen/PDF and in Excel, unchanged Quick View, narrow layouts, and 10 passing tests.
+- [x] Adapt every Open Sales Orders card to desktop, tablet, and phone widths; collapse Smart Filters, compact chart headers, and contain table scrolling without changing report calculations or downloads.
+- [x] Verify all eight chart/ranking panels, summary/status/Quick View cards, filters, pagination/search, Excel/PDF, and no page-width overflow at 1920/1440/1280/901/768/390/320px; 15 rule tests pass.
+- [x] Fit all non-table Open Orders cards within the current desktop viewport by reducing fonts, chart height, and spacing; keep the three overview charts together and the trend legend on one line.
+- [x] Verify no removed cards, unchanged totals/exports, and desktop fit plus mobile usability.
+- [x] Restore readable chart heights, fonts and label spacing; verified all eight panels at 951/901px and phone widths, unchanged 859 AH count, filters/pagination, PDF/Excel downloads, and 15 passing tests.
+- [x] Enlarge document-type/aging donut totals and right-align the single-line trend legend; verified 1,174 totals, all eight panels, matching legend colors, and no page-width overflow at 949/1500/1920/768/390/320px with updated screenshots.
+- [x] Keep the three overview cards in one desktop row from 850px; verified aligned tops/equal heights at 949/1280/1500/1920px, unchanged 1,174 totals, single-line legend, all eight panels, and no page-width overflow on tablets/phones; provided updated screenshot.
+- [x] ZCASH_FLOW table, SAP API sync (upsert) and Quality/Production install SQL
+
+- [x] Cash Flow screen: added button tooltips, per-classification colored ledger rows, radiant chart gradients, and 10/50/100/500 rows-per-page selector (default 10); verified 10/50-row paging, titles, gradients, colored rows, and clean build at 951px.
+- [x] Stop auto-refresh on tab focus/session renewal; add Cash Flow launchpad card (Credit/Debit/Net bars, last sync).
+- [x] Sales Register: visible chart colours, plant columns, rank lists, launchpad doc-type card, Distribution Channel column, coloured table, full Excel
+- [x] Month Wise Stock dashboard from Month Wise Upload

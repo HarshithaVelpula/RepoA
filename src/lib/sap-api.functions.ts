@@ -1,0 +1,863 @@
+/**
+ * SAP API Settings data access.
+ *
+ * Stores non-secret configuration (URLs, paths, headers and mappings). SAP
+ * passwords and the middleware shared secret remain on the middleware server.
+ */
+import { supabase } from "@/integrations/supabase/client";
+import { createServerFn } from "@tanstack/react-start";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { accessForUser } from "./access";
+import { isValidScheduleExpression, normalizeCron, parseDailySyncTimes } from "./cron";
+import {
+  IS_STATIC_BUILD,
+  keyValueObject,
+  STATIC_MIDDLEWARE_BASE,
+  withEndpointDates,
+  type PostingRange,
+} from "./sap-pull-shared";
+
+export type KeyValue = { key: string; value: string };
+
+export type SapSystem = {
+  id: string;
+  key: string;
+  label: string;
+  environment: string;
+  base_url: string;
+  sap_client: string | null;
+  username: string | null;
+  is_active: boolean;
+  last_test_status: string | null;
+  last_test_message: string | null;
+  last_test_at: string | null;
+  sort_order: number;
+};
+
+export type SapEndpoint = {
+  id: string;
+  name: string;
+  module_key: string;
+  description: string | null;
+  endpoint_path: string;
+  system_key: string | null;
+  http_method: string;
+  auth_type: string;
+  query_params: KeyValue[];
+  headers: KeyValue[];
+  body_template: string | null;
+  response_root: string | null;
+  response_notes: string | null;
+  sample_response: string | null;
+  scheduler_enabled: boolean;
+  schedule_expression: string | null;
+  last_run_at: string | null;
+  last_run_status: string | null;
+  is_active: boolean;
+  last_test_status: string | null;
+  last_test_message: string | null;
+  last_test_duration_ms: number | null;
+  last_synced_at: string | null;
+  posting_range: PostingRange;
+};
+
+export type MiddlewareConfig = {
+  id: string;
+  connection_mode: string;
+  deployment_mode: string;
+  middleware_port: number;
+  middleware_url: string;
+  last_test_status: string | null;
+  last_test_message: string | null;
+  last_test_at: string | null;
+};
+
+export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+export const AUTH_TYPES = [
+  { value: "basic", label: "Basic (via middleware)" },
+  { value: "proxy", label: "Proxy / Middleware" },
+  { value: "none", label: "None" },
+] as const;
+export const ENVIRONMENTS = ["DEV", "QUALITY", "PROD"] as const;
+export const CONNECTION_MODES = [
+  { value: "proxy", label: "Via Proxy Server" },
+  { value: "direct", label: "Direct to SAP" },
+] as const;
+export const DEPLOYMENT_MODES = [
+  { value: "self_hosted", label: "Self-hosted (on-prem)" },
+  { value: "cloud", label: "Cloud" },
+] as const;
+
+async function requireSuperAdmin(): Promise<void> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) throw new Error("NOT_AUTHENTICATED");
+  const access = await accessForUser(data.user.id);
+  if (!access.isSuperAdmin) throw new Error("Forbidden: Sharvi Admin role required");
+}
+
+function kv(raw: unknown): KeyValue[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((row): row is KeyValue => !!row && typeof row === "object" && "key" in row)
+    .map((row) => ({ key: String(row.key ?? ""), value: String(row.value ?? "") }));
+}
+
+/* ------------------------------- endpoints ------------------------------- */
+
+export async function listSapEndpoints(): Promise<SapEndpoint[]> {
+  await requireSuperAdmin();
+  const { data, error } = await supabase.from("sap_endpoints").select("*").order("name");
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    ...(row as unknown as SapEndpoint),
+    query_params: kv((row as { query_params: unknown }).query_params),
+    headers: kv((row as { headers: unknown }).headers),
+  }));
+}
+
+export type EndpointInput = {
+  name: string;
+  module_key: string;
+  description: string;
+  endpoint_path: string;
+  system_key: string;
+  http_method: string;
+  auth_type: string;
+  query_params: KeyValue[];
+  headers: KeyValue[];
+  body_template: string;
+  response_root: string;
+  response_notes: string;
+  scheduler_enabled: boolean;
+  schedule_expression: string;
+  is_active: boolean;
+  posting_range: PostingRange;
+};
+
+/**
+ * Applies the endpoint's own interval to the real background scheduler.
+ * Nothing about the schedule is hard-coded — whatever is saved here runs.
+ */
+async function applySchedule(input: EndpointInput): Promise<void> {
+  const dailyTimes = parseDailySyncTimes(input.schedule_expression);
+  const expression = dailyTimes === null
+    ? normalizeCron(input.schedule_expression)
+    : input.schedule_expression.trim();
+  if (input.scheduler_enabled && !isValidScheduleExpression(expression)) {
+    throw new Error(
+      `Choose at least one valid daily IST time, or enter a valid 5-field advanced schedule.`,
+    );
+  }
+  // Self-hosted installations run the middleware scheduler, which reads the
+  // saved expression directly. The hosted database timer only accepts cron.
+  if (IS_STATIC_BUILD) return;
+  if (dailyTimes !== null) {
+    throw new Error("Daily IST times are available on self-hosted installations.");
+  }
+  const { error } = await supabase.rpc("apply_sap_sync_schedule", {
+    _endpoint: input.name.trim(),
+    _enabled: input.scheduler_enabled,
+    _cron: expression,
+  });
+  if (error) throw new Error(`Schedule could not be applied: ${error.message}`);
+}
+
+function endpointPayload(input: EndpointInput) {
+  return {
+    name: input.name.trim(),
+    module_key: input.module_key,
+    description: input.description.trim() || null,
+    endpoint_path: input.endpoint_path.trim(),
+    system_key: input.system_key || null,
+    http_method: input.http_method,
+    auth_type: input.auth_type,
+    query_params: input.query_params.filter((row) => row.key.trim()),
+    headers: input.headers.filter((row) => row.key.trim()),
+    body_template: input.body_template.trim() || null,
+    response_root: input.response_root.trim() || null,
+    response_notes: input.response_notes.trim() || null,
+    scheduler_enabled: input.scheduler_enabled,
+    schedule_expression: input.schedule_expression.trim() || null,
+    is_active: input.is_active,
+    posting_range: input.posting_range,
+  };
+}
+
+export async function createSapEndpoint(input: EndpointInput): Promise<string> {
+  await requireSuperAdmin();
+  if (!input.name.trim()) throw new Error("Name is required");
+  if (!input.endpoint_path.trim()) throw new Error("Endpoint path or URL is required");
+  const { data, error } = await supabase
+    .from("sap_endpoints")
+    .insert(endpointPayload(input))
+    .select("id")
+    .single();
+  if (error) throw error;
+  await applySchedule(input);
+  return data.id;
+}
+
+export async function updateSapEndpoint(id: string, input: EndpointInput): Promise<void> {
+  await requireSuperAdmin();
+  const { error } = await supabase.from("sap_endpoints").update(endpointPayload(input)).eq("id", id);
+  if (error) throw error;
+  await applySchedule(input);
+}
+
+export async function deleteSapEndpoint(id: string): Promise<void> {
+  await requireSuperAdmin();
+  const { data: existing } = await supabase.from("sap_endpoints").select("name").eq("id", id).maybeSingle();
+  const { error } = await supabase.from("sap_endpoints").delete().eq("id", id);
+  if (error) throw error;
+  if (existing?.name) {
+    await supabase.rpc("apply_sap_sync_schedule", {
+      _endpoint: existing.name,
+      _enabled: false,
+      _cron: "",
+    });
+  }
+}
+
+/* -------------------------------- systems -------------------------------- */
+
+export async function listSapSystems(): Promise<SapSystem[]> {
+  await requireSuperAdmin();
+  const { data, error } = await supabase.from("sap_systems").select("*").order("sort_order").order("label");
+  if (error) throw error;
+  return (data ?? []) as unknown as SapSystem[];
+}
+
+export type SystemInput = {
+  key: string;
+  label: string;
+  environment: string;
+  base_url: string;
+  sap_client: string;
+  username: string;
+  is_active: boolean;
+};
+
+/** Credential keys that currently have a stored (encrypted) secret. */
+export const MIDDLEWARE_CREDENTIAL_KEY = "__middleware__";
+
+export async function listStoredCredentialKeys(): Promise<string[]> {
+  await requireSuperAdmin();
+  const { data, error } = await supabase.rpc("list_sap_credential_keys");
+  if (error) throw error;
+  return (data ?? []) as string[];
+}
+
+async function saveCredential(credKey: string, secret: string): Promise<void> {
+  const { error } = await supabase.rpc("set_sap_credential", {
+    _cred_key: credKey,
+    _secret: secret,
+  });
+  if (error) throw error;
+}
+
+export async function saveSapSystem(id: string | null, input: SystemInput): Promise<void> {
+  await requireSuperAdmin();
+  if (!input.label.trim()) throw new Error("Label is required");
+  const baseUrl = input.base_url.trim().replace(/\/+$/, "");
+  if (baseUrl) {
+    try {
+      const parsed = new URL(baseUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+    } catch {
+      throw new Error("SAP Base URL must be a complete http:// or https:// address");
+    }
+  }
+  const payload = {
+    key: (input.key || input.label).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    label: input.label.trim(),
+    environment: input.environment,
+    base_url: baseUrl,
+    sap_client: input.sap_client.trim() || null,
+    username: input.username.trim() || null,
+    is_active: input.is_active,
+  };
+  const { error } = id
+    ? await supabase.from("sap_systems").update(payload).eq("id", id)
+    : await supabase.from("sap_systems").insert(payload);
+  if (error) throw error;
+  if (input.is_active) {
+    await supabase.from("sap_systems").update({ is_active: false }).neq("key", payload.key);
+  }
+}
+
+export async function deleteSapSystem(id: string): Promise<void> {
+  await requireSuperAdmin();
+  const { error } = await supabase.from("sap_systems").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/* ------------------------------ middleware ------------------------------ */
+
+export async function getMiddlewareConfig(): Promise<MiddlewareConfig> {
+  await requireSuperAdmin();
+  const { data, error } = await supabase.from("sap_middleware_config").select("*").limit(1).maybeSingle();
+  if (error) throw error;
+  if (data) return data as unknown as MiddlewareConfig;
+  const created = await supabase.from("sap_middleware_config").insert({}).select("*").single();
+  if (created.error) throw created.error;
+  return created.data as unknown as MiddlewareConfig;
+}
+
+export type MiddlewareInput = {
+  connection_mode: string;
+  deployment_mode: string;
+  middleware_port: number;
+  middleware_url: string;
+  proxy_secret: string;
+};
+
+export async function saveMiddlewareConfig(id: string, input: MiddlewareInput): Promise<void> {
+  await requireSuperAdmin();
+  if (input.connection_mode === "proxy" && !input.middleware_url.trim()) {
+    throw new Error("Node.js middleware URL is required in proxy mode");
+  }
+  const { error } = await supabase
+    .from("sap_middleware_config")
+    .update({
+      connection_mode: input.connection_mode,
+      deployment_mode: input.deployment_mode,
+      middleware_port: input.middleware_port,
+      middleware_url: input.middleware_url.trim().replace(/\/+$/, ""),
+    })
+    .eq("id", id);
+  if (error) throw error;
+  if (input.proxy_secret.trim()) await saveCredential(MIDDLEWARE_CREDENTIAL_KEY, input.proxy_secret);
+}
+
+/* ----------------------------- connectivity ----------------------------- */
+
+export type TestStage =
+  | "secret-rejected"
+  | "sap-unreachable"
+  | "sap-http-error"
+  | "ok"
+  | "unknown";
+
+export type TestResult = {
+  ok: boolean;
+  status: number | null;
+  message: string;
+  durationMs: number;
+  body?: string;
+  /** Which leg of browser -> middleware -> SAP the call reached. */
+  stage: TestStage;
+  /** HTTP status SAP itself returned, when SAP was actually reached. */
+  sapStatus?: number | null;
+  traceId?: string | null;
+  /** True only when the middleware actually issued the SAP request. */
+  sapContacted: boolean;
+  /** Exact payload the portal sent to the middleware (for console/diagnostics). */
+  request?: OutboundRequest;
+  /** SAP answered successfully but the selected request returned no rows. */
+  noData?: boolean;
+};
+
+export type MiddlewareSystemStatus = {
+  key: string;
+  credentials: boolean;
+  insecureTls: boolean;
+};
+
+export type OutboundRequest = {
+  url: string;
+  method: string;
+  query: Record<string, string>;
+  headers: Record<string, string>;
+  body: unknown;
+};
+
+
+function describe(stage: TestStage, payload: Record<string, unknown>, fallback: string): string {
+  const msg = typeof payload["message"] === "string" ? (payload["message"] as string) : "";
+  if (msg) return msg;
+  if (stage === "secret-rejected") return "The middleware shared secret does not match — SAP was not contacted.";
+  return fallback;
+}
+
+type MiddlewareRequest = { path: string; body?: unknown };
+
+const callMiddlewareServer = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: MiddlewareRequest) => data)
+  .handler(async ({ data, context }) => {
+    const { data: isAdmin, error: roleError } = await context.supabase.rpc("is_super_admin", {
+      _user_id: context.userId,
+    });
+    if (roleError || !isAdmin) throw new Error("Forbidden: Sharvi Admin role required");
+
+    const sharedSecret = process.env["MIDDLEWARE_SHARED_SECRET"];
+    if (!sharedSecret) throw new Error("MIDDLEWARE_SHARED_SECRET is not configured in Lovable Cloud");
+
+    const { data: config, error: configError } = await context.supabase
+      .from("sap_middleware_config")
+      .select("middleware_url")
+      .limit(1)
+      .maybeSingle();
+    if (configError) throw configError;
+    const base = config?.middleware_url?.trim().replace(/\/+$/, "");
+    if (!base) throw new Error("Set the Node.js middleware URL under Middleware Configuration first");
+    if (!data.path.startsWith("/")) throw new Error("Invalid middleware path");
+
+    const response = await fetch(`${base}${data.path}`, {
+      method: data.body === undefined ? "GET" : "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-shared-secret": sharedSecret,
+      },
+      ...(data.body === undefined ? {} : { body: JSON.stringify(data.body) }),
+      signal: AbortSignal.timeout(120000),
+    });
+    return { status: response.status, text: await response.text() };
+  });
+
+/**
+ * Static build: the browser talks to the same-origin `/sap-mw/` Nginx bridge,
+ * which adds the shared secret server-side. Hosted build: the server function.
+ */
+async function middlewareRoundTrip(
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; text: string }> {
+  if (!IS_STATIC_BUILD) return callMiddlewareServer({ data: { path, body } });
+  const res = await fetch(`${STATIC_MIDDLEWARE_BASE}${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(600000),
+  });
+  return { status: res.status, text: await res.text() };
+}
+
+async function callMiddleware(path: string, body?: unknown): Promise<TestResult> {
+  const started = Date.now();
+  try {
+    const res = await middlewareRoundTrip(path, body);
+    const text = res.text;
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      payload = {};
+    }
+    const responseOk = res.status >= 200 && res.status < 300;
+    const stage = (typeof payload["stage"] === "string" ? payload["stage"] : responseOk ? "ok" : "unknown") as TestStage;
+    const sapStatus = typeof payload["status"] === "number" ? (payload["status"] as number) : null;
+    return {
+      ok: responseOk,
+      status: res.status,
+      message: describe(stage, payload, responseOk ? "Reachable" : `HTTP ${res.status}`),
+      durationMs:
+        typeof payload["durationMs"] === "number" ? (payload["durationMs"] as number) : Date.now() - started,
+      body: typeof payload["body"] === "string" ? (payload["body"] as string).slice(0, 200000) : text.slice(0, 4000),
+      stage,
+      sapStatus,
+      traceId: typeof payload["traceId"] === "string" ? (payload["traceId"] as string) : null,
+      sapContacted: stage === "ok" || stage === "sap-http-error",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      message: `${
+        err instanceof Error ? err.message : "Request failed"
+      } — the portal server could not reach the middleware, so SAP was not contacted.`,
+      durationMs: Date.now() - started,
+      stage: "unknown",
+      sapContacted: false,
+    };
+  }
+}
+
+/** Password availability only; the middleware never returns the password. */
+export async function getMiddlewareSystemStatuses(): Promise<MiddlewareSystemStatus[]> {
+  await requireSuperAdmin();
+  const result = await middlewareRoundTrip("/health");
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = JSON.parse(result.text) as Record<string, unknown>;
+  } catch {
+    throw new Error(`Middleware returned an invalid health response (HTTP ${result.status})`);
+  }
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(describe("unknown", payload, `Middleware health check failed (HTTP ${result.status})`));
+  }
+  if (!Array.isArray(payload["systems"])) return [];
+  return payload["systems"].flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const row = entry as Record<string, unknown>;
+    if (typeof row["key"] !== "string") return [];
+    return [{
+      key: row["key"],
+      credentials: row["credentials"] === true,
+      insecureTls: row["insecureTls"] === true,
+    }];
+  });
+}
+
+/** Recent middleware activity lines (newest last). */
+export async function fetchMiddlewareLogs(limit = 80): Promise<string[]> {
+  await requireSuperAdmin();
+  const result = await callMiddleware(`/logs/recent?limit=${limit}`);
+  if (!result.ok) throw new Error(result.message);
+  try {
+    const parsed = JSON.parse(result.body ?? "{}") as { lines?: string[] };
+    return parsed.lines ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Bare reachability probe of the SAP host from the middleware machine. */
+export async function pingSapHost(system: SapSystem | null): Promise<TestResult> {
+  await requireSuperAdmin();
+  const params = new URLSearchParams({
+    system: system?.key ?? "dev",
+    environment: system?.environment ?? "DEV",
+    baseUrl: system?.base_url ?? "",
+    sapClient: system?.sap_client ?? "",
+    username: system?.username ?? "",
+  });
+  return callMiddleware(`/diag/sap?${params.toString()}`);
+}
+
+
+export async function testMiddleware(): Promise<TestResult> {
+  await requireSuperAdmin();
+  const result = await callMiddleware("/health");
+  const config = await getMiddlewareConfig();
+  await supabase
+    .from("sap_middleware_config")
+    .update({
+      last_test_status: result.ok ? "ok" : "error",
+      last_test_message: result.message,
+      last_test_at: new Date().toISOString(),
+    })
+    .eq("id", config.id);
+  return result;
+}
+
+export async function testSapSystem(system: SapSystem): Promise<TestResult> {
+  await requireSuperAdmin();
+  const baseUrl = system.base_url.trim();
+  if (baseUrl) {
+    try {
+      const parsed = new URL(baseUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+    } catch {
+      throw new Error("SAP Base URL must be a complete http:// or https:// address");
+    }
+  }
+  const result = await callMiddleware("/sap/test", {
+    systemKey: system.key,
+    environment: system.environment,
+    baseUrl: system.base_url,
+    sapClient: system.sap_client,
+    username: system.username,
+  });
+  await supabase
+    .from("sap_systems")
+    .update({
+      last_test_status: result.ok ? "ok" : "error",
+      last_test_message: result.message,
+      last_test_at: new Date().toISOString(),
+    })
+    .eq("id", system.id);
+  return result;
+}
+
+/** Resolve the final URL an endpoint will hit, given the systems list. */
+export function resolveEndpointUrl(endpoint: {
+  endpoint_path: string;
+  system_key: string | null;
+}, systems: SapSystem[]): string {
+  const path = endpoint.endpoint_path.trim();
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      return new URL(path).toString();
+    } catch {
+      return "Invalid endpoint URL";
+    }
+  }
+  const system =
+    systems.find((s) => s.key === endpoint.system_key) ?? systems.find((s) => s.is_active) ?? systems[0];
+  if (!system) return path ? "SAP system not configured" : "Endpoint path not configured";
+  const base = system.base_url.replace(/\/+$/, "");
+  if (!base) return "SAP Base URL not configured";
+  try {
+    const parsedBase = new URL(base);
+    if (parsedBase.protocol !== "http:" && parsedBase.protocol !== "https:") {
+      return "Invalid SAP Base URL";
+    }
+    const resolved = new URL(path ? (path.startsWith("/") ? path : `/${path}`) : "/", parsedBase);
+    if (system.sap_client && !resolved.searchParams.has("sap-client")) {
+      resolved.searchParams.set("sap-client", system.sap_client);
+    }
+    return resolved.toString();
+  } catch {
+    return "Invalid SAP Base URL";
+  }
+}
+
+type SyncRunResult = {
+  status: "synced" | "skipped" | "error";
+  message: string;
+  received: number;
+  inserted: number;
+  updated: number;
+  stored?: number;
+  replaced?: number;
+  skipped: number;
+  durationMs: number;
+  httpStatus: number | null;
+  preview: string | null;
+};
+
+/**
+ * Static build only: ask the middleware to run the same complete snapshot
+ * workflow used by scheduled syncs. This keeps manual and scheduled writes
+ * identical and prevents a browser interruption from exposing partial data.
+ */
+async function runEndpointSyncBrowser(endpointName: string): Promise<SyncRunResult> {
+  const empty = { received: 0, inserted: 0, updated: 0, skipped: 0, preview: null, httpStatus: null };
+  const started = Date.now();
+  const fail = (message: string, extra: Partial<SyncRunResult> = {}): SyncRunResult => ({
+    status: "error",
+    message,
+    ...empty,
+    durationMs: Date.now() - started,
+    ...extra,
+  });
+
+  try {
+    const response = await fetch(`${STATIC_MIDDLEWARE_BASE}/sync/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: endpointName }),
+      signal: AbortSignal.timeout(600000),
+    });
+    const result = await response.json() as Record<string, unknown>;
+    const status = String(result["status"] ?? (response.ok ? "synced" : "error"));
+    if (!response.ok || status === "error") {
+      return fail(String(result["message"] ?? `Middleware returned HTTP ${response.status}`), {
+        durationMs: Date.now() - started,
+        httpStatus: response.status,
+      });
+    }
+    const received = Number(result["received"] ?? 0);
+    const stored = Number(result["stored"] ?? 0);
+    const replaced = Number(result["replaced"] ?? 0);
+    const invalid = Number(result["invalid"] ?? 0);
+    const message = received
+      ? `Data synced successfully — ${received.toLocaleString()} received, ${stored.toLocaleString()} stored, ${replaced.toLocaleString()} replaced, ${invalid.toLocaleString()} invalid`
+      : "No data available for this selection — existing data left unchanged";
+    return {
+      status: status === "skipped" ? "skipped" : "synced",
+      message,
+      received,
+      inserted: stored,
+      updated: 0,
+      stored,
+      replaced,
+      skipped: Number(result["skipped"] ?? 0),
+      durationMs: Date.now() - started,
+      httpStatus: response.status,
+      preview: null,
+    };
+  } catch (err) {
+    return fail(`Middleware unreachable (${err instanceof Error ? err.message : "fetch failed"}) — SAP was not contacted`);
+  }
+}
+
+export async function testSapEndpoint(endpoint: SapEndpoint, systems: SapSystem[]): Promise<TestResult> {
+  await requireSuperAdmin();
+  const query = Object.fromEntries(endpoint.query_params.map((row) => [row.key, row.value]));
+  const headers = Object.fromEntries(endpoint.headers.map((row) => [row.key, row.value]));
+  let parsedBody: unknown = withEndpointDates(
+    endpoint.name,
+    endpoint.body_template,
+    endpoint.posting_range,
+  ) ?? undefined;
+  try {
+    if (typeof parsedBody === "string") parsedBody = JSON.parse(parsedBody);
+  } catch {
+    /* keep the raw body */
+  }
+  const outbound: OutboundRequest = {
+    url: resolveEndpointUrl(endpoint, systems),
+    method: endpoint.http_method,
+    query,
+    headers,
+    body: parsedBody,
+  };
+  // Visible in the browser console so the exact payload can be inspected.
+  console.info("[SAP request]", endpoint.name, outbound);
+
+  // The whole round trip runs on the portal server: middleware -> parse ->
+  // upsert. Multi-MB SAP responses never travel through the browser.
+  const started = Date.now();
+  const run = IS_STATIC_BUILD
+    ? await runEndpointSyncBrowser(endpoint.name)
+    : await runEndpointSyncServer({ data: { endpointName: endpoint.name } });
+  console.info("[SAP response]", endpoint.name, { status: run.status, durationMs: run.durationMs });
+
+  const durationMs = run.durationMs ?? Date.now() - started;
+  const ok = run.status === "synced";
+  const noData = ok && run.inserted + run.updated === 0;
+  const message = ok
+    ? run.message || (noData
+      ? "No data available for this selection"
+      : `Data synced successfully — ${run.received.toLocaleString()} records (${run.inserted.toLocaleString()} new, ${run.updated.toLocaleString()} updated)`)
+    : run.message;
+
+  await supabase
+    .from("sap_endpoints")
+    .update({
+      last_test_status: ok ? "ok" : "error",
+      last_test_message: message,
+      last_test_duration_ms: durationMs,
+      ...(run.preview ? { sample_response: run.preview } : {}),
+    })
+    .eq("id", endpoint.id);
+
+  return {
+    ok,
+    status: run.httpStatus ?? null,
+    message,
+    durationMs,
+    stage: ok ? "ok" : "unknown",
+    sapStatus: run.httpStatus ?? null,
+    sapContacted: run.httpStatus != null && run.httpStatus !== 404,
+    request: outbound,
+    noData,
+    ...(run.preview ? { body: run.preview } : {}),
+  };
+}
+
+
+export type SyncRun = {
+  id: string;
+  endpoint: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  records_received: number;
+  records_inserted: number;
+  records_updated: number;
+  records_stored: number;
+  records_replaced: number;
+  records_invalid: number;
+  records_skipped: number;
+  response_bytes: number;
+  duration_ms: number;
+  http_status: number | null;
+  error_message: string | null;
+  request_snapshot: unknown;
+  sync_scope_key: string | null;
+  snapshot_id: string | null;
+};
+
+/** Newest run per endpoint, keyed by endpoint name — drives the card badges. */
+export async function listLatestRuns(): Promise<Record<string, SyncRun>> {
+  const { data, error } = await supabase
+    .from("sap_sync_runs")
+    .select(
+      "id, endpoint, status, started_at, finished_at, records_received, records_inserted, records_updated, records_stored, records_replaced, records_invalid, records_skipped, response_bytes, duration_ms, http_status, error_message, request_snapshot, sync_scope_key, snapshot_id",
+    )
+    .order("started_at", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  const latest: Record<string, SyncRun> = {};
+  for (const row of (data ?? []) as SyncRun[]) {
+    if (!latest[row.endpoint]) latest[row.endpoint] = row;
+  }
+  return latest;
+}
+
+/** Recent sync runs for an endpoint — used for the Scheduler health panel. */
+
+export async function listSyncRuns(endpointName: string, limit = 10): Promise<SyncRun[]> {
+  const { data, error } = await supabase
+    .from("sap_sync_runs")
+    .select(
+      "id, endpoint, status, started_at, finished_at, records_received, records_inserted, records_updated, records_stored, records_replaced, records_invalid, records_skipped, response_bytes, duration_ms, http_status, error_message, request_snapshot, sync_scope_key, snapshot_id",
+    )
+    .eq("endpoint", endpointName)
+    .order("started_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as SyncRun[];
+}
+
+
+/**
+ * Runs one full sync for an endpoint on the server (Sharvi Admin only):
+ * middleware call, JSON parse and batched upsert. Only a small preview of the
+ * response is returned, so large payloads never cross the RPC boundary.
+ */
+const runEndpointSyncServer = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: { endpointName: string }) => data)
+  .handler(async ({ data, context }) => {
+    const { data: roleRows, error } = await context.supabase
+      .from("user_role_assignments").select("role_key").eq("user_id", context.userId);
+    const { canSyncSap } = await import("@/lib/sync-access");
+    if (error || !canSyncSap((roleRows ?? []).map((r) => r.role_key))) {
+      throw new Error("Forbidden: Admin or Sharvi Admin role required");
+    }
+
+    const { pullSapEndpoint } = await import("@/lib/sap-pull.server");
+    const result = await pullSapEndpoint(data.endpointName);
+
+    if (result.status === "synced") {
+      return {
+        status: "synced" as const,
+        message: "",
+        received: result.received,
+        inserted: result.stored,
+        updated: 0,
+        stored: result.stored,
+        replaced: result.replaced,
+        skipped: result.skipped,
+        durationMs: result.durationMs ?? 0,
+        httpStatus: result.httpStatus ?? null,
+        preview: result.preview ?? null,
+      };
+    }
+    if (result.status === "skipped") {
+      return {
+        status: "skipped" as const,
+        message: result.reason,
+        received: 0,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        durationMs: 0,
+        httpStatus: null,
+        preview: null,
+      };
+    }
+    return {
+      status: "error" as const,
+      message: result.message,
+      received: 0,
+      inserted: 0,
+      updated: 0,
+      skipped: 0,
+      durationMs: result.durationMs ?? 0,
+      httpStatus: result.httpStatus ?? null,
+      preview: result.preview ?? null,
+    };
+  });
+
+
+/** Runs one named endpoint sync (Sharvi Admin only), same path as SAP API Settings. */
+export async function runNamedEndpointSync(endpointName: string): Promise<SyncRunResult> {
+  return IS_STATIC_BUILD
+    ? runEndpointSyncBrowser(endpointName)
+    : (runEndpointSyncServer({ data: { endpointName } }) as Promise<SyncRunResult>);
+}

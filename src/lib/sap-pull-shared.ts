@@ -1,0 +1,343 @@
+/**
+ * Client-safe helpers shared by the server-side SAP pull and the static-build
+ * browser sync. Pure functions only — no Supabase admin client, no env reads.
+ */
+
+import { stripJsonComments } from "./payload-fields";
+import { isSitEndpoint } from "./sit-map";
+
+/**
+ * Recovers the complete objects of a JSON array that was cut mid-document
+ * (an older middleware build truncates responses). Scans with string/escape
+ * awareness so a cut inside a quoted value cannot corrupt the salvage.
+ */
+export function salvageTruncatedArray(text: string): unknown[] | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("[")) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let lastComplete = -1;
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const ch = trimmed[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      if (inString) escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{" || ch === "[") depth += 1;
+    else if (ch === "}" || ch === "]") {
+      depth -= 1;
+      if (depth === 1) lastComplete = i;
+    }
+  }
+  if (lastComplete < 0) return null;
+  try {
+    const rows = JSON.parse(`${trimmed.slice(0, lastComplete + 1)}]`) as unknown[];
+    return Array.isArray(rows) && rows.length ? rows : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When the middleware's own JSON envelope is cut mid-document, the SAP payload
+ * still sits inside its `"body":"..."` string. Extract and unescape it so the
+ * salvage above can run on the array itself.
+ */
+export function extractEmbeddedBody(text: string): string | null {
+  const marker = '"body":"';
+  const start = text.indexOf(marker);
+  if (start < 0) return null;
+  const raw = text.slice(start + marker.length);
+  try {
+    // Close the string so JSON.parse can unescape it; drop a dangling escape.
+    const safe = raw.replace(/\\$/, "");
+    return JSON.parse(`"${safe.replace(/"$/, "")}"`) as string;
+  } catch {
+    // Unescape manually as a last resort.
+    return raw
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\\\/g, "\\");
+  }
+}
+
+/** Posting-date window options saved on each endpoint. */
+export type PostingRange = "today" | "yesterday" | "last7d" | "last1m" | "last6m" | "last1y" | "fytd" | "custom";
+
+export const POSTING_RANGES: { value: PostingRange; label: string }[] = [
+  { value: "today", label: "Current date" },
+  { value: "yesterday", label: "Previous date" },
+  { value: "last7d", label: "Last 7 days" },
+  { value: "last1m", label: "Last 1 month" },
+  { value: "last6m", label: "Last 6 months" },
+  { value: "last1y", label: "Last 1 year" },
+  { value: "fytd", label: "Financial year to date" },
+  { value: "custom", label: "Custom dates" },
+];
+
+const sapDateOf = (d: Date) =>
+  `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+
+/**
+ * Computes the posting window for a preset at the moment of the call:
+ * To = today, From = today minus the chosen span. Returns null for `custom`,
+ * meaning the dates stored in the payload are used unchanged.
+ */
+export function postingWindow(range: string | null | undefined, now: Date = new Date()): { from: string; to: string } | null {
+  const to = new Date(now);
+  const from = new Date(now);
+  switch (range) {
+    case "today":
+      break;
+    case "yesterday":
+      from.setDate(from.getDate() - 1);
+      to.setDate(to.getDate() - 1);
+      break;
+    case "last7d":
+      from.setDate(from.getDate() - 7);
+      break;
+    case "last1m":
+      from.setMonth(from.getMonth() - 1);
+      break;
+    case "last6m":
+      from.setMonth(from.getMonth() - 6);
+      break;
+    case "last1y":
+      from.setFullYear(from.getFullYear() - 1);
+      break;
+    case "fytd": {
+      const y = to.getMonth() >= 3 ? to.getFullYear() : to.getFullYear() - 1;
+      from.setFullYear(y, 3, 1);
+      break;
+    }
+    default:
+      return null;
+  }
+  return { from: sapDateOf(from), to: sapDateOf(to) };
+}
+
+/**
+ * Ensures BUDAT_F / BUDAT_T in the payload. With a preset `range` the window
+ * is recomputed for every call, so a scheduled endpoint always follows today;
+ * with `custom` the saved dates are kept and only empty/invalid ones default
+ * to To = today, From = today − 7 days.
+ */
+export function withPostingDates(raw: string | null | undefined, range?: string | null): string | undefined {
+  if (!raw || !raw.trim()) return raw ?? undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+  const obj = parsed as Record<string, unknown>;
+  const window = postingWindow(range);
+  if (window) {
+    if ("BUDAT_F" in obj) obj["BUDAT_F"] = window.from;
+    if ("BUDAT_T" in obj) obj["BUDAT_T"] = window.to;
+    return JSON.stringify(obj);
+  }
+  const sapDate = (daysAgo: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return sapDateOf(d);
+  };
+  const valid = (v: unknown) => /^\d{8}$/.test(String(v ?? "").trim());
+  if ("BUDAT_F" in obj && !valid(obj["BUDAT_F"])) obj["BUDAT_F"] = sapDate(7);
+  if ("BUDAT_T" in obj && !valid(obj["BUDAT_T"])) obj["BUDAT_T"] = sapDate(0);
+  return JSON.stringify(obj);
+}
+
+export function withOpenSalesOrdersDate(
+  raw: string | null | undefined,
+  now: Date = new Date(),
+  useCurrentDate = false,
+): string | undefined {
+  if (!raw || !raw.trim()) return raw ?? undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+    const obj = parsed as Record<string, unknown>;
+    const savedDate = String(obj["fkdat"] ?? "").trim();
+    return JSON.stringify({
+      ...obj,
+      fkdat: useCurrentDate || !/^\d{8}$/.test(savedDate) ? sapDateOf(now) : savedDate,
+    });
+  } catch { return raw; }
+}
+
+/** Matches legacy spacing/underscore variants of the configured endpoint name. */
+export function isOpenSalesOrdersEndpoint(endpointName: string): boolean {
+  return endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase() === "opensalesorders";
+}
+
+/** Order Book: ERDAT_F / ERDAT_T follow the window preset; custom keeps saved dates. */
+export function withOrderBookDates(raw: string | null | undefined, range?: string | null, now: Date = new Date()): string | undefined {
+  if (!raw || !raw.trim()) return raw ?? undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+    const obj = { ...(parsed as Record<string, unknown>) };
+    const window = postingWindow(range, now);
+    const valid = (v: unknown) => /^\d{8}$/.test(String(v ?? "").trim());
+    if (window) { obj["ERDAT_F"] = window.from; obj["ERDAT_T"] = window.to; }
+    else {
+      const from = new Date(now); from.setDate(from.getDate() - 7);
+      if (!valid(obj["ERDAT_F"])) obj["ERDAT_F"] = sapDateOf(from);
+      if (!valid(obj["ERDAT_T"])) obj["ERDAT_T"] = sapDateOf(now);
+    }
+    return JSON.stringify(obj);
+  } catch { return raw; }
+}
+
+/** SIT: scheduled runs send today's FKDAT_F; manual runs keep the saved date (empty/invalid → today). Empty FKDAT_T is dropped. */
+export function withSitDates(raw: string | null | undefined, range?: string | null, now: Date = new Date(), scheduled = false): string | undefined {
+  if (!raw || !raw.trim()) return raw ?? undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+    const obj = { ...(parsed as Record<string, unknown>) };
+    const window = postingWindow(range, now);
+    if (window) { obj["FKDAT_F"] = window.from; obj["FKDAT_T"] = range === "today" ? "" : window.to; }
+    const from = String(obj["FKDAT_F"] ?? "").trim();
+    if (scheduled || !/^\d{8}$/.test(from)) obj["FKDAT_F"] = sapDateOf(now);
+    if (!String(obj["FKDAT_T"] ?? "").trim()) delete obj["FKDAT_T"];
+    return JSON.stringify(obj);
+  } catch { return raw; }
+}
+
+/** Sales Register (ZVF05): SAP requires MODE — DAILY for scheduled runs, ONETIME for manual runs with the saved dates. */
+export function withSalesRegisterMode(raw: string | null | undefined, scheduled = false, range?: string | null, now: Date = new Date()): string | undefined {
+  try {
+    const parsed = raw && raw.trim() ? JSON.parse(raw) as unknown : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw ?? undefined;
+    const obj: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) if (k.toLowerCase() !== "mode") obj[k] = v;
+    // A preset date window follows today on every run (billing date FKDAT_F/FKDAT_T, any key case).
+    const window = postingWindow(range, now);
+    if (window) for (const k of Object.keys(obj)) {
+      if (/^fkdat_f$/i.test(k)) obj[k] = window.from;
+      else if (/^fkdat_t$/i.test(k)) obj[k] = window.to;
+    }
+    obj["MODE"] = scheduled ? "DAILY" : "ONETIME";
+    return JSON.stringify(obj);
+  } catch { return raw ?? undefined; }
+}
+
+/** Open PO (ZOPENPO): DOCUMENT_DATE.FROM_DATE / TO_DATE follow the window preset; custom keeps saved dates (empty → last 7 days). */
+export function withOpenPoDates(raw: string | null | undefined, range?: string | null, now: Date = new Date()): string | undefined {
+  if (!raw || !raw.trim()) return raw ?? undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+    const obj = { ...(parsed as Record<string, unknown>) };
+    // ZPO_LIST: flat BEDAT_FROM / BEDAT_TO.
+    const bf = Object.keys(obj).find((k) => k.toUpperCase() === "BEDAT_FROM");
+    if (bf) {
+      const bt = Object.keys(obj).find((k) => k.toUpperCase() === "BEDAT_TO") ?? "BEDAT_TO";
+      const w = postingWindow(range, now);
+      const ok = (v: unknown) => /^\d{8}$/.test(String(v ?? "").trim());
+      // SAP ZPO_LIST dumps (HTTP 500) on an empty BEDAT_FROM, so both dates are always sent.
+      const fyStart = `${now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1}0401`;
+      if (w) { obj[bf] = range === "today" ? sapDateOf(now) : w.from; obj[bt] = w.to; }
+      else { if (!ok(obj[bf])) obj[bf] = fyStart; if (!ok(obj[bt])) obj[bt] = sapDateOf(now); }
+      return JSON.stringify(obj);
+    }
+    // Key case follows the saved payload (ZOPENPO uses DOCUMENT_DATE/FROM_DATE, ZME2N document_date/from_date).
+    const docKey = Object.keys(obj).find((k) => k.toLowerCase() === "document_date") ?? "DOCUMENT_DATE";
+    const doc = obj[docKey] && typeof obj[docKey] === "object" ? { ...(obj[docKey] as Record<string, unknown>) } : {};
+    const lower = docKey === docKey.toLowerCase();
+    const fromKey = Object.keys(doc).find((k) => k.toLowerCase() === "from_date") ?? (lower ? "from_date" : "FROM_DATE");
+    const toKey = Object.keys(doc).find((k) => k.toLowerCase() === "to_date") ?? (lower ? "to_date" : "TO_DATE");
+    const window = postingWindow(range, now);
+    const valid = (v: unknown) => /^\d{8}$/.test(String(v ?? "").trim());
+    // Today sends an empty FROM_DATE (SAP: everything up to today); custom keeps an empty FROM_DATE.
+    if (window) { doc[fromKey] = range === "today" ? "" : window.from; doc[toKey] = window.to; }
+    else {
+      if (!valid(doc[fromKey])) doc[fromKey] = "";
+      if (!valid(doc[toKey])) doc[toKey] = sapDateOf(now);
+    }
+    obj[docKey] = doc;
+    return JSON.stringify(obj);
+  } catch { return raw; }
+}
+
+/** ZDPR: FROMDT/TODT (YYYY-MM-DD) follow the date-window preset; custom keeps saved dates (empty → last 7 days). */
+export function withDprDates(raw: string | null | undefined, range?: string | null, now: Date = new Date()): string | undefined {
+  if (!raw || !raw.trim()) return raw ?? undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+    const obj = { ...(parsed as Record<string, unknown>) };
+    const iso = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+    const valid = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v ?? "").trim());
+    delete obj["BUDAT_F"]; delete obj["BUDAT_T"];
+    const window = postingWindow(range, now);
+    if (window) { obj["FROMDT"] = iso(window.from); obj["TODT"] = iso(window.to); }
+    else {
+      const from = new Date(now); from.setDate(from.getDate() - 7);
+      if (!valid(obj["FROMDT"])) obj["FROMDT"] = iso(sapDateOf(from));
+      if (!valid(obj["TODT"])) obj["TODT"] = iso(sapDateOf(now));
+    }
+    return JSON.stringify(obj);
+  } catch { return raw; }
+}
+
+export function withEndpointDates(
+  endpointName: string,
+  raw: string | null | undefined,
+  range?: string | null,
+  now = new Date(),
+  scheduled = false,
+) {
+  // `//` lines in a saved payload mark optional keys that are not sent.
+  if (raw && /^\s*\/\//m.test(raw)) raw = stripJsonComments(raw);
+  if (/openpurchaseorder|^z?openpo$/.test(endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase())) return withOpenPoDates(raw, range, now);
+  // ZME2N Purchase Orders: same document-date window as Open PO (lowercase keys).
+  if (/zme2n|^me2n|^purchaseorders?$|zpolist|polist/.test(endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase())) return withOpenPoDates(raw, range, now);
+  if (isSitEndpoint(endpointName)) return withSitDates(raw, range, now, scheduled);
+  if (endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase().includes("salesregister")) return withSalesRegisterMode(raw, scheduled, range, now);
+  // ZCASH_FLOW sends its saved payload verbatim (fiscal_year / posting_date object).
+  if (/^zcashflown?$/.test(endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase())) return raw ?? undefined;
+  // User Management dropdowns: no date injection, payload sent as saved.
+  if (endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase().includes("usermanagementdropdown")) return raw ?? undefined;
+  if (/dailyproduction|^zdpr$/.test(endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase())) return withDprDates(raw, range, now);
+  if (endpointName.replace(/[^a-z0-9]/gi, "").toLowerCase().includes("orderbook")) return withOrderBookDates(raw, range, now);
+  return isOpenSalesOrdersEndpoint(endpointName)
+    ? withOpenSalesOrdersDate(raw, now, scheduled)
+    : withPostingDates(raw, range);
+}
+
+/** Turns the stored `[{key,value}]` rows into a plain object. */
+export function keyValueObject(raw: unknown): Record<string, string> {
+  return Array.isArray(raw)
+    ? Object.fromEntries(
+        (raw as { key?: unknown; value?: unknown }[])
+          .filter((r) => r && typeof r === "object" && String(r.key ?? "").trim())
+          .map((r) => [String(r.key), String(r.value ?? "")]),
+      )
+    : {};
+}
+
+/** Human-readable byte size for run messages. */
+export function formatBytes(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+}
+
+/** True when this bundle is the on-prem static SPA build (no app server). */
+export const IS_STATIC_BUILD = import.meta.env["VITE_STATIC_BUILD"] === "1";
+
+/** Same-origin Nginx bridge that injects the middleware shared secret. */
+export const STATIC_MIDDLEWARE_BASE = "/sap-mw";

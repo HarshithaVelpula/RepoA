@@ -1,0 +1,244 @@
+# MIS SAP Middleware
+
+Small Node.js service that sits between the MIS portal (static SPA) and SAP.
+It exists so SAP credentials never reach the browser: they live only in this
+service's `.env`.
+
+This folder lives at the project root (`middleware/`), next to `src/`.
+
+## Endpoints
+
+| Method | Path         | Purpose |
+| ------ | ------------ | ------- |
+| GET    | `/health`    | Version, uptime, public base URL, allowed origins and which SAP systems have credentials configured. |
+| POST   | `/sap/test`  | Resolves a system + path and performs a GET against SAP; returns status and timing. |
+| POST   | `/sap/call`  | Generic proxy — method, path, query, headers, body. Adds basic auth and `sap-client`. |
+
+Every request must send `x-shared-secret`. The portal attaches it from its
+server runtime, so the value is never exposed in browser code.
+
+## Configuration
+
+| Variable | Meaning |
+| -------- | ------- |
+| `PORT` | Local listening port (default 3008). |
+| `APP_BASE_URL` | Public URL the portal uses to reach this service (ngrok / LAN / nginx path). Must match the portal's **Node.js middleware URL**. |
+| `MIDDLEWARE_SHARED_SECRET` | Strong secret that exactly matches the protected Lovable Cloud secret. |
+| `SAP_*_BASE_URL` / `_CLIENT` / `_USER` / `_PASSWORD` | Per-environment SAP connection and technical user. |
+| `SAP_*_CA_CERT_PATH` | Optional PEM CA certificate path for an HTTPS SAP system using a private/self-signed certificate. |
+| `SAP_*_TLS_INSECURE` | Temporary per-environment fallback. Set exactly `true` to disable certificate verification only for that SAP environment. |
+
+`APP_BASE_URL` is the public ngrok/server URL of this middleware. Browser CORS
+and portal signing-key settings are not needed because calls are server-to-server.
+
+## Run locally
+
+```bash
+cd middleware
+cp .env.example .env      # fill in SAP passwords and all three URL settings
+npm install
+npm start                 # listens on :3008
+```
+
+Windows PowerShell:
+
+```powershell
+cd middleware
+node .\server.mjs
+```
+
+Both commands load `.env` from this folder. On startup the service prints
+whether the `.env` was found, the public base URL, whether shared-secret auth is
+configured and which SAP systems have a password — values
+themselves are never printed.
+
+## Run with Docker
+
+```bash
+cd middleware
+docker build -t mis-sap-middleware .
+docker run -d --name mis-sap-middleware --env-file .env -p 3008:3008 --restart unless-stopped mis-sap-middleware
+```
+
+## Nginx (optional public path)
+
+```nginx
+location /sap-middleware/ {
+    proxy_pass         http://127.0.0.1:3008/;
+    proxy_set_header   Host $host;
+    proxy_set_header   X-Real-IP $remote_addr;
+    proxy_read_timeout 60s;
+}
+```
+
+## Wiring it to the portal
+
+1. Sign in as Sharvi Admin and open **Administration → SAP API Settings**.
+2. **Middleware Configuration** — set the middleware URL to the same value as
+   `APP_BASE_URL` and press **Test middleware**.
+3. **SAP Systems** — set base URL, client and technical username per
+   environment.
+4. **APIs** — register endpoints with a relative path (they inherit the active
+   system's base URL) and press **Test connection**.
+
+## Troubleshooting
+
+| Portal message | Cause |
+| -------------- | ----- |
+| `HTTP 401 Invalid or missing x-shared-secret` | The Lovable Cloud and middleware secret values do not match. |
+| Portal server could not reach middleware | The ngrok URL is wrong, offline or inaccessible. |
+| `HTTP 502 No SAP base URL configured` | The selected SAP system has no base URL. |
+| `DEPTH_ZERO_SELF_SIGNED_CERT` | SAP uses a private/self-signed HTTPS certificate. Configure its CA certificate path, or temporarily enable the matching insecure TLS switch. |
+| `ERR_TLS_CERT_ALTNAME_INVALID` | The SAP URL hostname/IP does not match the certificate. Use the certificate's DNS name or have SAP issue a matching certificate. |
+
+### SAP HTTP and HTTPS
+
+- `http://` SAP URLs work without certificate configuration.
+- `https://` SAP URLs with a publicly trusted certificate work without extra configuration.
+- For private/self-signed HTTPS, obtain the root/intermediate CA bundle from the SAP/Basis team and store it as a PEM file on the middleware server.
+
+Quality-server example when **Environment is `QUALITY`** in SAP Systems:
+
+```bash
+sudo install -d -m 750 /opt/MIS_Projects/Quality/middleware/certs
+sudo install -m 640 sap-quality-ca.pem /opt/MIS_Projects/Quality/middleware/certs/sap-quality-ca.pem
+```
+
+```dotenv
+SAP_QUALITY_PASSWORD=<SAP password>
+SAP_QUALITY_CA_CERT_PATH=/opt/MIS_Projects/Quality/middleware/certs/sap-quality-ca.pem
+```
+
+The variable prefix follows the selected Environment: `DEV` uses `SAP_DEV_*`, `QUALITY` uses `SAP_QUALITY_*`, and `PRODUCTION` uses `SAP_PROD_*`. The separate system key only links API endpoints to their SAP Systems record. Restart the matching PM2 process after changing `.env`. The middleware applies this CA only to that SAP environment; certificate verification remains enabled for every connection.
+
+The SAP Systems screen supplies the HTTPS URL, client, and username. Those matching `.env` values may remain blank. The password and private CA path always come from `.env`.
+
+If SAP provides a self-signed leaf certificate instead of a CA chain, the PEM file may contain that exact certificate. If SAP renews it, replace the file and restart the middleware. Never use `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+
+If SAP cannot supply a certificate, temporary insecure mode can be enabled independently per environment:
+
+```dotenv
+# Quality only
+SAP_QUALITY_TLS_INSECURE=true
+
+# Production only, if separately required
+SAP_PROD_TLS_INSECURE=true
+```
+
+Only the explicit value `true` enables it. A configured CA takes priority and remains verified. Restart the matching PM2 process after changing the setting. Startup and request logs display a warning while it is active. Remove the line or set it to `false` after installing a proper certificate. This bypass exposes SAP credentials and data to interception, so restrict it to a trusted internal network.
+
+## Security notes
+
+- Never commit `.env`; keep it `chmod 600` and owned by the service user.
+- Keep the service on the internal network where possible; expose it only
+  through the portal's nginx with TLS.
+- Use a long random shared secret and rotate it if it is ever disclosed.
+- Rotate any SAP password or token-verification value that has been shared
+  outside the server.
+- Keep SAP CA files readable only by the middleware service account. CA files are not passwords, but they must not be editable by untrusted users.
+
+## Did the request actually reach SAP?
+
+Every response carries a `stage` field, and the portal toast now names it:
+
+| stage | meaning |
+| --- | --- |
+| `secret-rejected` | The shared secret is missing or does not match. **SAP was not contacted.** |
+| `sap-unreachable` | DNS/connect/timeout to the SAP host. **SAP was not contacted.** |
+| `sap-http-error` | SAP answered, with a non-2xx status. **SAP was reached.** |
+| `ok` | SAP answered 2xx. |
+
+### Logs
+
+Each SAP round trip gets a short trace id and is written to the console *and* to
+`middleware/logs/sap-YYYY-MM-DD.log` (rotated at 5 MB, git-ignored):
+
+```text
+[a1b2c3] -> SAP GET http://10.10.4.18:8000/fisales_detail/report?sap-client=234
+[a1b2c3]    system=dev auth=basic user=SIPL_MOUNIKA password=set timeout=30000ms
+[a1b2c3] <- 200 in 412ms, 18342 bytes, content-type application/json
+[a1b2c3]    body[0..300]: {"d":{"results":[{...
+```
+
+`xx` instead of `<-` means the request never got an answer from SAP.
+Passwords and tokens are never logged.
+
+The last 400 lines are also served by `GET /logs/recent?limit=80` (shared secret
+required) and are shown in the portal under **SAP API Settings → endpoint →
+Connectivity → Recent middleware activity**.
+
+### Is the SAP host reachable at all?
+
+`GET /diag/sap?system=dev` performs a bare probe of the SAP base URL — no report
+call — and reports host, port, status and connect time. The portal exposes it as
+the **Ping SAP host** button next to Test connection.
+
+## Automatic scheduled sync (self-hosted portal)
+
+On Lovable-hosted deployments the schedule is fired by the cloud database. A
+self-hosted portal is a static site behind Nginx, so there is no always-running
+app server to receive that trigger. This service runs the scheduler instead.
+
+Add these two settings to `middleware/.env` and restart the service:
+
+```dotenv
+SUPABASE_URL=http://127.0.0.1:8000          # local API gateway (Kong)
+SUPABASE_SERVICE_ROLE_KEY=<service role key> # server-side only
+```
+
+Startup then logs `scheduler started`. If either value is missing it logs
+`scheduler DISABLED` and the service behaves exactly as before.
+
+Everything the scheduler does is read from the portal on every tick — nothing
+is hard-coded:
+
+| Read every minute from | Used for |
+| --- | --- |
+| `sap_endpoints.schedule_expression` | when to run (daily `IST:HH:mm,...` times or an existing 5-field cron) |
+| `sap_endpoints.scheduler_enabled` / `is_active` | whether to run at all |
+| `sap_endpoints.endpoint_path`, `http_method`, `query_params`, `headers`, `body_template` | the SAP request |
+| `sap_systems.base_url`, `sap_client` | which SAP system and client |
+
+SAP passwords still come only from this service's `.env`.
+
+Each run writes a `sap_sync_runs` row (received / stored / replaced / invalid,
+bytes, duration, HTTP status, error) and updates the endpoint's last run and
+last synced stamps, so **SAP API Settings → Scheduler** shows real history. Only
+the newest 6 runs per endpoint are kept. Version 1.8.0 stages a complete snapshot
+for each endpoint and request-filter scope, validates the staged row count, then
+atomically replaces only the prior snapshot for that same scope. Every received
+occurrence is stored, including byte-for-byte duplicate SAP objects. An empty or
+failed SAP response leaves the previous completed snapshot unchanged.
+
+### One-time rebuild after upgrading to 1.8.0
+
+The old hash-key rows and new scoped snapshots must not be mixed. After deploying
+the updated `server.mjs`, `scheduler.mjs`, and `sync-core.mjs`, clear Quality once:
+
+```sql
+TRUNCATE TABLE public.zfisales_detail;
+```
+
+Then run every required Sales KPI payload again and verify that the database row
+count equals the sum of each active scope's stored count. Validate Quality totals before
+repeating the same one-time process in Production.
+
+Force one run from the server:
+
+```bash
+curl -X POST http://127.0.0.1:3002/sync/run \
+  -H 'content-type: application/json' \
+  -H "x-shared-secret: $MIDDLEWARE_SHARED_SECRET" \
+  -d '{"endpoint":"Sales_Reports_KPI"}'
+```
+
+`GET /sync/status` reports whether the scheduler is enabled.
+
+### Row mapping stays in one place
+
+`sync-core.mjs` is generated from the portal's own mapping code. After changing
+`src/lib/zfisales-map.ts` or `src/lib/sap-pull-shared.ts`, regenerate it:
+
+```bash
+cd middleware && npm run build:sync-core
+```
